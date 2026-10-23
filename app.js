@@ -62,10 +62,12 @@
     if (dt.toDateString() === y.toDateString()) return 'dün ' + hm;
     return dt.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }) + ' ' + hm;
   }
-  function bar(it) {
-    const max = Math.max(it.target, it.qty, 1);
-    const st = S.status(it);
-    return `<div class="bar"><span class="st-${st}" style="width:${Math.min(100, it.qty / max * 100)}%"></span><em style="left:${it.min / max * 100}%"></em></div>`;
+  // ilerleme çubuğu: düz = elde, taralı = siparişte (yolda / onayda), kesik çizgili = hazırlanan taslak
+  function bar(it, big = false, draft = 0) {
+    const onay = S.pendingQtyFor(it.id, ['onay']), yol = S.pendingQtyFor(it.id, ['verildi']);
+    const max = Math.max(it.target, it.qty + onay + yol + draft, 1);
+    const st = S.status(it), w = x => Math.min(100, x / max * 100);
+    return `<div class="bar ${big ? 'bar-big' : ''}"><span class="st-${st}" style="width:${w(it.qty)}%"></span>${yol ? `<span class="seg-yol" style="width:${w(yol)}%"></span>` : ''}${onay ? `<span class="seg-onay" style="width:${w(onay)}%"></span>` : ''}${draft ? `<span class="seg-draft" style="width:${w(draft)}%"></span>` : ''}<em style="left:${w(it.min)}%"></em>${big ? `<i class="tgt" style="left:calc(${w(it.target)}% - 2px)"></i>` : ''}</div>`;
   }
   function toast(msg) {
     let t = document.querySelector('.toast');
@@ -382,7 +384,7 @@
           <span class="dot st-${st}"></span>
           <div class="main">
             <div class="t">${esc(it.name)}</div>
-            <div class="s">${ui.stokDept === 'all' ? esc(S.dept(it.deptId)?.name) + ' · ' : ''}min ${fmt(it.min)} · ${esc(sup?.name || 'tedarikçi yok')}${pend ? ` · <span class="pending">yolda ${fmt(pend)}</span>` : ''}</div>
+            <div class="s">${ui.stokDept === 'all' ? esc(S.dept(it.deptId)?.name) + ' · ' : ''}min ${fmt(it.min)} · ${esc(sup?.name || 'tedarikçi yok')}${pend ? pendLabel(it.id) : ''}</div>
             ${bar(it)}
           </div>
           <div class="qty"><span class="n" style="color:${st === 'iyi' ? 'var(--ink)' : `var(--${st === 'azaliyor' ? 'warn' : 'bad'})`}">${fmt(it.qty)}</span><span class="u">${esc(it.unit)}</span>
@@ -466,7 +468,7 @@
   }
   function pendLabel(itId) {
     const onay = S.pendingQtyFor(itId, ['onay']), yol = S.pendingQtyFor(itId, ['verildi']);
-    return (onay ? ` · <span class="pending">onayda ${fmt(onay)}</span>` : '') + (yol ? ` · <span class="pending">yolda ${fmt(yol)}</span>` : '');
+    return (onay ? ` · <span class="pending p-onay">onayda ${fmt(onay)}</span>` : '') + (yol ? ` · <span class="pending p-yol">yolda ${fmt(yol)}</span>` : '');
   }
 
   function viewSiparis() {
@@ -1131,26 +1133,82 @@
     const st = S.status(it), dept = S.dept(it.deptId), sup = S.supplier(it.supplierId);
     const hist = S.get().movements.filter(m => m.itemId === id).slice(0, 5);
     const canCount = myDepts().some(d => d.id === it.deptId);
-    let v = it.qty;
+    const onay = S.pendingQtyFor(id, ['onay']), yol = S.pendingQtyFor(id, ['verildi']);
+    const open = S.get().orders.filter(o => ['onay', 'verildi'].includes(o.status) && o.lines.some(l => l.itemId === id));
+    const canOrder = (can('siparis_hazirla') || can('siparis_direkt')) && sup;
+    const gap = Math.max(it.target - it.qty - onay - yol, 0);
+    let v = it.qty, oq = gap > 0 ? Math.ceil(gap * 2) / 2 : 0;
+    const legend = d => `<div class="legend">
+        <span><i class="lg st-${st}"></i>Elde <b>${fmt(it.qty)}</b></span>
+        ${yol ? `<span><i class="lg seg-yol"></i>Yolda <b>${fmt(yol)}</b></span>` : ''}
+        ${onay ? `<span><i class="lg seg-onay"></i>Onayda <b>${fmt(onay)}</b></span>` : ''}
+        ${d ? `<span><i class="lg seg-draft"></i>Yeni <b>${fmt(d)}</b></span>` : ''}
+        <span class="lg-tot"><b>${fmt(it.qty + yol + onay + d)}</b> / ${fmt(it.target)} ${esc(it.unit)}</span></div>`;
     sheet(`
       <h3>${esc(it.name)}</h3>
       <div class="sub">${dept?.icon || ''} ${esc(dept?.name)} · ${esc(sup?.name || 'tedarikçi yok')} · <span class="badge st-${st}">${ST_LABEL[st]}</span></div>
-      <div class="kv"><div><b>${fmt(it.min)}</b><span>Minimum</span></div><div><b>${fmt(it.target)}</b><span>Hedef</span></div><div><b>${fmt(S.pendingQtyFor(id))}</b><span>Yolda</span></div></div>
+      <div class="big-bar-wrap"><div id="bigBar">${bar(it, true, 0)}</div><div id="legend">${legend(0)}</div>
+        <div class="bar-marks small muted"><span>min ${fmt(it.min)}</span><span>hedef ${fmt(it.target)}</span></div></div>
+
+      <h2 class="section">Sayım</h2>
       ${canCount ? `
       <div class="big-stepper"><button data-s="-1">−</button><div><input id="bigQ" inputmode="decimal" value="${fmt(v)}"><div class="u">${esc(it.unit)} · elde</div></div><button data-s="1">+</button></div>
-      <button class="btn primary block" id="saveItem">Kaydet</button>` : `<div class="card small muted">Bu bölümün sayımını sadece ilgili personel yapabilir.</div>`}
+      <button class="btn primary block" id="saveItem">Sayımı kaydet</button>` : `<div class="card small muted">Bu bölümün sayımını sadece ilgili personel yapabilir.</div>`}
+
+      <h2 class="section">Sipariş</h2>
+      ${open.length ? `<div class="list" style="margin-bottom:10px">${open.map(o => {
+        const l = o.lines.find(x => x.itemId === id), os = OST[o.status];
+        return `<div class="row"><span class="lg-dot ${o.status === 'onay' ? 'seg-onay' : 'seg-yol'}"></span>
+          <div class="main"><div class="t">${esc(o.no)} · ${fmt(l.qty)} ${esc(it.unit)}</div><div class="s">${esc(S.supplier(o.supplierId)?.name || '')} · ${esc(o.createdBy)} · ${ago(o.createdAt)}</div></div>
+          ${o.status === 'verildi' && can('teslim') ? `<button class="btn primary sm" data-recv="${o.id}">Teslim al</button>`
+            : o.status === 'onay' && can('siparis_onay') ? `<button class="btn sm" data-rev="${o.id}">İncele</button>` : `<span class="badge st-${os.tone}">${os.name}</span>`}
+        </div>`; }).join('')}</div>` : ''}
+      ${!sup ? `<div class="card small muted">Bu malzemeye tedarikçi atanmamış; sipariş için önce tedarikçi seçilmeli.</div>`
+        : canOrder ? `
+      <div class="order-box">
+        <div class="ob-row"><div><b>Yeni sipariş</b><div class="small muted">${gap > 0 ? `Hedefe ${fmt(gap)} ${esc(it.unit)} eksik` : 'Elde + siparişte olan hedefi karşılıyor'}</div></div>
+          <div class="stepper"><button data-o="-1">−</button><input id="ordQ" inputmode="decimal" value="${fmt(oq)}"><button data-o="1">+</button></div></div>
+        <input class="note-in" id="ordNote" placeholder="${can('siparis_direkt') ? 'Not (isteğe bağlı)' : 'Yöneticiye not (isteğe bağlı)'}">
+        ${can('siparis_direkt')
+          ? `<div class="btn-row">${sup.phone ? `<button class="btn wa" id="ordWa">WhatsApp ile gönder</button>` : ''}<button class="btn dark" id="ordMark">Sipariş verildi</button></div>`
+          : `<button class="btn primary block" id="ordReq">Onaya gönder</button>`}
+      </div>` : `<div class="card small muted">Sipariş hazırlama yetkin yok.</div>`}
+
       <h2 class="section">Geçmiş</h2>
       <div class="list">${hist.map(m => `<div class="row"><div class="main"><div class="t" style="font-weight:500">${esc(m.user)} ${MV_LABEL[m.type]}</div><div class="s">${ago(m.at)}${m.note ? ' · ' + esc(m.note) : ''}</div></div><div class="qty small"><span class="muted">${fmt(m.before)} →</span> <b>${fmt(m.after)}</b></div></div>`).join('') || '<div class="empty small">Kayıt yok</div>'}</div>
       ${can('malzeme') ? `<button class="btn ghost block" style="margin-top:10px" id="editItem">Malzemeyi düzenle</button>` : ''}`,
       sh => {
-        const inp = sh.querySelector('#bigQ');
+        const inp = sh.querySelector('#bigQ'), oin = sh.querySelector('#ordQ');
+        let touched = false;
+        const redraw = () => { const d = oin && touched ? Math.max(0, num(oin.value)) : 0; sh.querySelector('#bigBar').innerHTML = bar(it, true, d); sh.querySelector('#legend').innerHTML = legend(d); };
         sh.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { v = Math.max(0, num(inp.value) + stepOf(it) * b.dataset.s); inp.value = fmt(v); });
         sh.querySelector('#saveItem')?.addEventListener('click', () => {
           const nv = num(inp.value);
           if (nv !== it.qty) { S.setQty(id, nv, user.name, 'sayim'); S.saveCount([], user.name); toast(`${it.name}: ${fmt(nv)} ${it.unit} kaydedildi`); }
           closeSheet(); render();
         });
+        sh.querySelectorAll('[data-o]').forEach(b => b.onclick = () => { touched = true; oin.value = fmt(Math.max(0, num(oin.value) + stepOf(it) * b.dataset.o)); redraw(); });
+        oin?.addEventListener('input', () => { touched = true; redraw(); }); oin?.addEventListener('focus', () => oin.select());
+        const place = via => {
+          const q = num(oin.value); if (q <= 0) return toast('Sipariş miktarı gir');
+          const note = sh.querySelector('#ordNote').value.trim(), lines = [{ itemId: id, qty: q }];
+          let o;
+          if (via === 'req') { o = S.requestOrder(it.supplierId, lines, user.name, note); toast(`${o.no} onaya gönderildi`); }
+          else {
+            o = S.createOrder(it.supplierId, lines, user.name, note);
+            if (via === 'wa') window.open(`https://wa.me/${sup.phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank');
+            toast(`${o.no} yolda`);
+          }
+          delete ui.orderDraft[id];
+          render(); openItem(id);
+        };
+        sh.querySelector('#ordReq')?.addEventListener('click', () => place('req'));
+        sh.querySelector('#ordWa')?.addEventListener('click', () => place('wa'));
+        sh.querySelector('#ordMark')?.addEventListener('click', () => place('mark'));
+        sh.querySelectorAll('[data-recv]').forEach(b => b.onclick = () => receiveSheet(b.dataset.recv, () => openItem(id)));
+        sh.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => reviewOrder(b.dataset.rev));
         sh.querySelector('#editItem')?.addEventListener('click', () => editItem(id));
+        redraw();
       });
   }
 
@@ -1261,7 +1319,7 @@
       });
   }
 
-  function receiveSheet(oid) {
+  function receiveSheet(oid, after) {
     const o = S.get().orders.find(x => x.id === oid), sup = S.supplier(o.supplierId);
     sheet(`<h3>Teslim al</h3><div class="sub">${esc(sup?.name || '')} · gelen miktarları kontrol et, stoğa eklenecek</div>
       <div class="list">${o.lines.map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main"><div class="t" style="font-weight:600">${esc(it?.name)}</div><div class="small muted">Sipariş: ${fmt(l.qty)} · elde ${fmt(it?.qty)}</div></div><input class="num" inputmode="decimal" data-rq="${l.itemId}" value="${fmt(l.qty)}"><span class="small muted" style="width:38px">${esc(it?.unit)}</span></div>`; }).join('')}</div>
@@ -1269,6 +1327,7 @@
       sh.querySelector('#rcv').onclick = () => {
         const rec = {}; sh.querySelectorAll('[data-rq]').forEach(i => rec[i.dataset.rq] = num(i.value));
         S.receiveOrder(oid, rec, user.name); closeSheet(); render(); toast('Teslim alındı, stok güncellendi');
+        if (after) setTimeout(after, 280);
       };
     });
   }
