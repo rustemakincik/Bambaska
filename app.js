@@ -47,6 +47,11 @@ var __rest = (this && this.__rest) || function (s, e) {
                 ['tedarikci', 'Tedarikçi ekleme / düzenleme'],
                 ['bolum', 'Bölüm ekleme / düzenleme'],
             ]],
+        ['Servis (arıza / bakım)', [
+                ['servis_talep', 'Arıza / bakım talebi açma', 'Demirbaş için arıza bildirir ya da bakım ister'],
+                ['servis_onay', 'Servis taleplerini onaylama / reddetme'],
+                ['servis_takip', 'Servisle iletişim ve sonuç girme', 'Servisi arar, kayıt no / randevu girer, işi kapatır'],
+            ]],
         ['Demirbaş', [
                 ['demirbas_durum', 'Demirbaş durumunu değiştirme', 'Arızalı, tamirde, kayıp, aktif…'],
                 ['demirbas_yonet', 'Demirbaş ekleme / düzenleme / etiket yazdırma'],
@@ -57,12 +62,13 @@ var __rest = (this && this.__rest) || function (s, e) {
     ];
     const PRESET = {
         gelistirici: {}, // her şeyi görür, hiçbir şeyi değiştiremez; yönetici isterse açar
-        mudur: { sayim_tum: 1, siparis_hazirla: 1, tedarikci_iletisim: 1, teslim: 1, malzeme: 1, tedarikci: 1, bolum: 1, demirbas_durum: 1, demirbas_yonet: 1 },
-        personel: { siparis_hazirla: 1, teslim: 1, demirbas_durum: 1 },
+        mudur: { sayim_tum: 1, siparis_hazirla: 1, tedarikci_iletisim: 1, servis_talep: 1, servis_takip: 1, teslim: 1, malzeme: 1, tedarikci: 1, bolum: 1, demirbas_durum: 1, demirbas_yonet: 1 },
+        personel: { siparis_hazirla: 1, teslim: 1, demirbas_durum: 1, servis_talep: 1 },
     };
     const permsOf = u => u.perms || PRESET[u.role] || PRESET.personel;
     // sonradan eklenen yetkiler: daha önce kaydedilmiş kullanıcılarda rolün varsayılanı geçerli
-    const hasPerm = (u, p) => { const v = permsOf(u)[p]; return v === undefined ? !!(u.perms && p === 'tedarikci_iletisim' && u.role === 'mudur') : !!v; };
+    const LATE = { tedarikci_iletisim: ['mudur'], servis_talep: ['mudur', 'personel'], servis_takip: ['mudur'] };
+    const hasPerm = (u, p) => { const v = permsOf(u)[p]; return v === undefined ? !!(u.perms && (LATE[p] || []).includes(u.role)) : !!v; };
     const can = p => !!user && (user.role === 'yonetici' || hasPerm(user, p));
     const isDev = () => (user === null || user === void 0 ? void 0 : user.role) === 'gelistirici';
     const viewAll = () => isAdmin() || isDev();
@@ -583,11 +589,17 @@ var __rest = (this && this.__rest) || function (s, e) {
         </div>` : `<div class="alert ok"><div class="big">✓</div><div><b>Tüm stoklar yeterli</b><div class="small muted">Sipariş gerekmiyor</div></div></div>`}
       ${(() => {
             const sw = db.orders.filter(o => isShopper(o));
-            const scard = sw.map(o => {
+            let scard = sw.map(o => {
                 var _a;
                 return `<a href="#/siparis" data-act="go-yolda" class="card approve-card" style="margin-top:10px">
             <span style="font-size:22px">🛒</span><div style="flex:1"><b>Alışveriş listen: ${esc(o.no)}</b><div class="small muted">${esc(((_a = S.supplier(o.supplierId)) === null || _a === void 0 ? void 0 : _a.name) || '')} · ${o.lines.filter(l => S.lineLeft(l) > 0).length} kalem${o.shopDue ? ' · ' + etaTxt(o.shopDue) : ''}${o.shopNote ? ' · ' + esc(o.shopNote) : ''}</div></div><span class="btn primary sm">Aç</span></a>`;
             }).join('');
+            const tks = db.tickets || [], ml = maintList().filter(x => x.late && !x.open);
+            const tkc = (n, ic, title, body, tab) => n ? `<a href="#/demirbas" data-act="go-servis" data-id="${tab}" class="card approve-card" style="margin-top:10px"><span style="font-size:22px">${ic}</span><div style="flex:1"><b>${title}</b><div class="small muted">${body}</div></div><span class="btn primary sm">Aç</span></a>` : '';
+            const tkOn = tks.filter(t => t.status === 'talep'), tkSv = tks.filter(t => t.status === 'servis');
+            scard += (canTkApprove() ? tkc(tkOn.length, '🔧', `${tkOn.length} arıza / bakım talebi onay bekliyor`, esc(tkOn.map(t => { var _a; return `${((_a = S.asset(t.assetId)) === null || _a === void 0 ? void 0 : _a.name) || ''}${t.priority === 'acil' ? ' 🔥' : ''}`; }).join(', ')), 'talep') : '')
+                + (canTkTrack() ? tkc(tkSv.length, '📞', `${tkSv.length} kayıt servise bildirilecek`, esc(tkSv.map(t => { var _a; return ((_a = S.asset(t.assetId)) === null || _a === void 0 ? void 0 : _a.name) || ''; }).join(', ')), 'servis') : '')
+                + (canTkOpen() || canTkApprove() ? tkc(ml.length, '🛠️', `${ml.length} demirbaşın bakımı geldi`, esc(ml.map(x => x.a.name).join(', ')), 'talep') : '');
             const tw = db.orders.filter(o => { var _a; return o.status === 'tedarik' && canContact(o) && (!isAdmin() || !contactors(o).length || ((_a = o.contacts) === null || _a === void 0 ? void 0 : _a.length)); });
             const tcard = tw.length ? `<a href="#/siparis" data-act="go-tedarik" class="card approve-card" style="margin-top:10px">
             <span style="font-size:22px">📞</span><div style="flex:1"><b>${tw.length} sipariş tedarikçiye iletilecek</b><div class="small muted">${esc(tw.map(o => { var _a, _b; return `${o.no} · ${((_a = S.supplier(o.supplierId)) === null || _a === void 0 ? void 0 : _a.name) || ''}${((_b = o.contacts) === null || _b === void 0 ? void 0 : _b.length) ? ' (cevap bekleniyor)' : ''}`; }).join(', '))}</div></div><span class="btn primary sm">Aç</span></a>` : '';
@@ -1173,7 +1185,7 @@ var __rest = (this && this.__rest) || function (s, e) {
     const ACAT = id => S.ASSET_CATS.find(c => c.id === id) || S.ASSET_CATS[S.ASSET_CATS.length - 1];
     const assetUrl = a => location.origin + location.pathname + '#/d/' + encodeURIComponent(a.code);
     const LOCS = () => [...new Set(['Salon', 'Bahçe', 'Okey bölümü', 'Bar', 'Mutfak', 'Nargile', 'Depo', ...S.get().assets.map(a => a.location).filter(Boolean)])];
-    Object.assign(ui, { aCat: 'all', aStatus: 'all', aQ: '' });
+    Object.assign(ui, { aCat: 'all', aStatus: 'all', aQ: '', aView: 'list', tkTab: 'talep' });
     function viewDemirbas() {
         const db = S.get();
         const q = ui.aQ.toLocaleLowerCase('tr');
@@ -1182,7 +1194,11 @@ var __rest = (this && this.__rest) || function (s, e) {
             && (!q || (a.name + ' ' + a.code + ' ' + (a.location || '') + ' ' + (a.serial || '')).toLocaleLowerCase('tr').includes(q)));
         const rank = { arizali: 0, kayip: 1, tamirde: 2, aktif: 3, hurda: 4 };
         list.sort((a, b) => rank[a.status] - rank[b.status] || a.code.localeCompare(b.code));
-        return `
+        const openT = visibleTickets().filter(t => !['bitti', 'red'].includes(t.status)).length, dueN = maintList().filter(x => x.late).length;
+        const top = `<div class="seg" style="margin-bottom:12px"><button class="${ui.aView === 'list' ? 'on' : ''}" data-act="a-view" data-id="list">🏷️ Demirbaşlar</button><button class="${ui.aView === 'servis' ? 'on' : ''}" data-act="a-view" data-id="servis">🔧 Arıza / bakım${openT + dueN ? ` <span class="seg-n warn">${openT + dueN}</span>` : ''}</button></div>`;
+        if (ui.aView === 'servis')
+            return top + viewServis();
+        return top + `
       <button class="btn dark block scan-cta" data-act="scan">📷 Karekod okut</button>
       <div class="stat-grid">${S.ASSET_STATUS.map(s => `
         <button class="stat st-${s.tone} ${ui.aStatus === s.id ? 'on' : ''}" data-act="a-status" data-id="${s.id}"><b>${cnt(s.id)}</b><span>${s.name}</span></button>`).join('')}
@@ -1236,6 +1252,7 @@ var __rest = (this && this.__rest) || function (s, e) {
       </div>
       ${info.length ? `<div class="info-grid">${info.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join('')}</div>` : ''}
       ${a.note ? `<div class="card small" style="margin-top:10px;box-shadow:none;background:var(--bg)">📝 ${esc(a.note)}</div>` : ''}
+      ${assetServiceBox(a)}
       ${can('demirbas_durum') ? `<h2 class="section">Hızlı işlem</h2>
       <div class="quick">${(QUICK[a.status] || []).map(([to, label, note]) => `<button class="st-${AST(to).tone}" data-q="${to}" data-note="${esc(note)}">${label}<small>→ ${AST(to).name}</small></button>`).join('')}</div>
       <label class="field" style="margin-top:12px"><span>Not ekle (isteğe bağlı)</span><input id="stNote" placeholder="örn. ekranda çizgi var, X servisine verildi"></label>
@@ -1254,12 +1271,238 @@ var __rest = (this && this.__rest) || function (s, e) {
                 closeSheet();
                 toast(`${a.code} · ${a.name} → ${AST(to).name}`);
             };
-            sh.querySelectorAll('[data-q]').forEach(b => b.onclick = () => apply(b.dataset.q, b.dataset.note));
+            sh.querySelectorAll('[data-q]').forEach(b => b.onclick = () => {
+                // "Bozuldu" artık servis talebi açar (onay → servis → sonuç)
+                if (b.dataset.q === 'arizali' && canTkOpen() && !S.openTicketFor(a.id))
+                    return ticketForm(a.id, 'ariza', sh.querySelector('#stNote').value.trim());
+                apply(b.dataset.q, b.dataset.note);
+            });
+            sh.querySelectorAll('[data-newtk]').forEach(b => b.onclick = () => ticketForm(a.id, b.dataset.newtk));
+            sh.querySelectorAll('[data-opentk]').forEach(b => b.onclick = () => { closeSheet(true); ui.aView = 'servis'; ui.tkTab = tkTabOf(S.ticket(b.dataset.opentk)); location.hash = '#/demirbas'; render(); });
             sh.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { if (b.dataset.st !== a.status)
                 apply(b.dataset.st, ''); });
             (_a = sh.querySelector('#editA')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => editAsset(a.id));
         });
     }
+    // ---------- SERVİS: arıza / bakım talepleri
+    const TST = {
+        talep: { name: 'Onay bekliyor', tone: 'azaliyor', icon: '⏳' },
+        servis: { name: 'Servise bildirilecek', tone: 'azaliyor', icon: '📞' },
+        islemde: { name: 'İşlemde', tone: 'iyi', icon: '🔧' },
+        bitti: { name: 'Tamamlandı', tone: 'pasif', icon: '✅' },
+        red: { name: 'Reddedildi', tone: 'kritik', icon: '✖️' },
+    };
+    const TTYPE = { ariza: ['⚠️', 'Arıza'], bakim: ['🛠️', 'Bakım'] };
+    const RES = { cozuldu: 'Çözüldü', onarilamadi: 'Onarılamadı', gerek_yok: 'Servise gerek kalmadı' };
+    const canTkOpen = () => !readOnly() && can('servis_talep');
+    const canTkApprove = () => !readOnly() && can('servis_onay');
+    const canTkTrack = () => !readOnly() && can('servis_takip');
+    const visibleTickets = () => (S.get().tickets || []).filter(t => viewAll() || can('servis_onay') || can('servis_takip') || can('demirbas_yonet') || t.createdBy === user.name);
+    const tkTabOf = t => !t ? 'talep' : ['bitti', 'red'].includes(t.status) ? 'gecmis' : t.status;
+    const tkState = t => {
+        var _a;
+        return t.status === 'servis' && ((_a = t.contacts) === null || _a === void 0 ? void 0 : _a.length) ? { name: 'Bildirildi · cevap bekleniyor', tone: 'azaliyor', icon: '📨' }
+            : t.status === 'islemde' && t.taken ? { name: 'Cihaz serviste', tone: 'azaliyor', icon: '🚐' }
+                : t.status === 'islemde' && t.visitAt ? { name: `Randevu ${etaTxt(t.visitAt)}`, tone: 'iyi', icon: '📅' }
+                    : t.status === 'bitti' && t.resolution === 'onarilamadi' ? { name: 'Onarılamadı', tone: 'kritik', icon: '🚫' }
+                        : TST[t.status] || TST.talep;
+    };
+    // bakım takibi: periyodu olan demirbaşlar, sonraki bakım tarihi
+    function maintList() {
+        const soon = Date.now() + 7 * 864e5;
+        return S.get().assets.filter(a => a.maintEvery && a.status !== 'hurda').map(a => ({ a, due: S.maintDue(a) }))
+            .map(x => (Object.assign(Object.assign({}, x), { late: x.due <= soon, open: S.openTicketFor(x.a.id) }))).sort((x, y) => x.due - y.due);
+    }
+    function svcLine(svId) {
+        const sv = S.service(svId);
+        if (!sv)
+            return '';
+        return `${esc(sv.name)}${sv.phone ? ` · <a href="tel:+${esc(sv.phone)}">+${esc(sv.phone)}</a>` : ''}`;
+    }
+    function assetServiceBox(a) {
+        const tk = S.openTicketFor(a.id), due = S.maintDue(a), sv = S.service(a.serviceId);
+        const rows = [];
+        if (sv)
+            rows.push(`<div>🔧 <b>Servis:</b> ${svcLine(sv.id)}${sv.topic ? ` <span class="muted">· ${esc(sv.topic)}</span>` : ''}</div>`);
+        if (due)
+            rows.push(`<div>🛠️ <b>Bakım:</b> ${a.maintEvery} ayda bir · sonraki <b style="color:${due < Date.now() ? 'var(--bad)' : 'inherit'}">${new Date(due).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}${due < Date.now() ? ' (gecikti)' : ''}</b>${a.lastMaint ? ` · son ${new Date(a.lastMaint).toLocaleDateString('tr-TR')}` : ''}</div>`);
+        const done = (S.get().tickets || []).filter(t => t.assetId === a.id && t.status === 'bitti').length;
+        return `<div class="card small svc-box">${rows.join('') || '<div class="muted">Servis bilgisi girilmemiş.</div>'}
+      ${tk ? `<button class="tk-open" data-opentk="${tk.id}"><span>${TTYPE[tk.type][0]} <b>${esc(tk.no)}</b> ${TTYPE[tk.type][1]} talebi açık</span><span class="badge st-${tkState(tk).tone}">${tkState(tk).name}</span></button>`
+            : canTkOpen() ? `<div class="btn-row" style="margin-top:8px"><button class="btn sm" data-newtk="ariza">⚠️ Arıza bildir</button><button class="btn sm" data-newtk="bakim">🛠️ Bakım talebi</button></div>` : ''}
+      ${done ? `<div class="muted" style="margin-top:6px">${done} servis kaydı tamamlandı</div>` : ''}</div>`;
+    }
+    function ticketForm(assetId, type = 'ariza', preset = '') {
+        const a = S.asset(assetId);
+        if (!a)
+            return;
+        const svs = S.get().services || [];
+        let ty = type, pr = 'normal';
+        const draw = sh => {
+            sh.querySelectorAll('[data-ty]').forEach(b => b.classList.toggle('on', b.dataset.ty === ty));
+            sh.querySelectorAll('[data-pr]').forEach(b => b.classList.toggle('on', b.dataset.pr === pr));
+            sh.querySelector('#tkDesc').placeholder = ty === 'ariza' ? 'Ne oldu? örn. HDMI görüntü vermiyor, açılmıyor' : 'Ne yapılsın? örn. periyodik bakım, kireç temizliği';
+            sh.querySelector('#tkOk').textContent = canTkApprove() ? (ty === 'ariza' ? 'Arıza kaydı aç' : 'Bakım kaydı aç') : 'Onaya gönder';
+        };
+        sheet(`<h3>${esc(a.name)}</h3><div class="sub"><span class="code">${esc(a.code)}</span> · ${esc(a.location || '')} — servis talebi</div>
+      <div class="seg" style="margin:4px 0 12px"><button data-ty="ariza">⚠️ Arıza</button><button data-ty="bakim">🛠️ Bakım</button></div>
+      <label class="field"><span>Açıklama</span><textarea id="tkDesc" rows="3">${esc(preset)}</textarea></label>
+      <div class="field"><span>Aciliyet</span><div class="chips" style="margin:0;padding:0"><button class="chip" data-pr="normal">Normal</button><button class="chip" data-pr="acil">🔥 Acil</button></div></div>
+      <label class="field"><span>Servis</span><select id="tkSvc"><option value="">— Seçilmedi —</option>${svs.map(v => `<option value="${v.id}" ${v.id === a.serviceId ? 'selected' : ''}>${esc(v.name)}${v.topic ? ' · ' + esc(v.topic) : ''}</option>`).join('')}</select></label>
+      ${ty === 'ariza' && a.status === 'aktif' ? `<div class="small muted" style="margin:-4px 0 10px">Demirbaş “Arızalı” olarak işaretlenir.</div>` : ''}
+      <button class="btn primary block" id="tkOk"></button>`, sh => {
+            draw(sh);
+            sh.querySelectorAll('[data-ty]').forEach(b => b.onclick = () => { ty = b.dataset.ty; draw(sh); });
+            sh.querySelectorAll('[data-pr]').forEach(b => b.onclick = () => { pr = b.dataset.pr; draw(sh); });
+            sh.querySelector('#tkOk').onclick = () => {
+                const desc = sh.querySelector('#tkDesc').value.trim();
+                if (ty === 'ariza' && !desc)
+                    return toast('Arızayı kısaca yaz');
+                const tk = S.createTicket({ assetId: a.id, type: ty, priority: pr, desc, serviceId: sh.querySelector('#tkSvc').value || null }, user.name, canTkApprove());
+                closeSheet();
+                ui.aView = 'servis';
+                ui.tkTab = tkTabOf(tk);
+                location.hash = '#/demirbas';
+                render();
+                toast(tk.status === 'talep' ? `${tk.no} onaya gönderildi` : `${tk.no} açıldı · servise bildirilecek`);
+            };
+        });
+    }
+    function viewServis() {
+        const all = visibleTickets(), by = st => all.filter(t => st.includes(t.status));
+        const ml = maintList(), late = ml.filter(x => x.late && !x.open);
+        const tabs = [['talep', 'Onay', by(['talep']).length], ['servis', 'Servis', by(['servis']).length], ['islemde', 'İşlemde', by(['islemde']).length], ['gecmis', 'Geçmiş', 0]];
+        const list = ui.tkTab === 'gecmis' ? by(['bitti', 'red']) : by([ui.tkTab]);
+        const empty = { talep: 'Onay bekleyen talep yok', servis: 'Servise bildirilecek kayıt yok', islemde: 'İşlemde kayıt yok', gecmis: 'Geçmiş kayıt yok' }[ui.tkTab];
+        return `${late.length ? `<div class="card maint-card"><div class="mc-head">🛠️ <b>${late.length} demirbaşın bakımı geldi</b></div>${late.map(x => `<div class="mc-row"><div class="main"><b>${esc(x.a.name)}</b><div class="small muted">${esc(x.a.code)} · ${x.due < Date.now() ? `<span style="color:var(--bad)">${Math.round((Date.now() - x.due) / 864e5)} gün gecikti</span>` : etaTxt(x.due)}</div></div>${canTkOpen() ? `<button class="btn sm" data-act="tk-maint" data-id="${x.a.id}">Bakım talebi</button>` : ''}</div>`).join('')}</div>` : ''}
+      <div class="seg">${tabs.map(([k, l, n]) => `<button class="${ui.tkTab === k ? 'on' : ''}" data-act="tk-tab" data-id="${k}">${l}${n ? ` <span class="seg-n warn">${n}</span>` : ''}</button>`).join('')}</div>
+      ${list.map(ticketCard).join('') || `<div class="empty"><div class="e">🔧</div>${empty}</div>`}
+      ${canTkOpen() ? `<div class="small muted" style="text-align:center;margin-top:10px">Yeni talep: demirbaşı aç (ya da karekodunu okut) → <b>Arıza bildir</b> / <b>Bakım talebi</b></div>` : ''}`;
+    }
+    function ticketCard(t) {
+        var _a;
+        const a = S.asset(t.assetId), st = tkState(t), sv = S.service(t.serviceId), [ic, tn] = TTYPE[t.type] || TTYPE.ariza;
+        const meta = t.status === 'talep' ? `${esc(t.createdBy)} · ${ago(t.createdAt)}`
+            : t.status === 'servis' ? (((_a = t.contacts) === null || _a === void 0 ? void 0 : _a.length) ? `${esc(t.contacts[t.contacts.length - 1].by)} bildirdi · ${ago(t.contacts[t.contacts.length - 1].at)}` : `Onaylayan ${esc(t.approvedBy || '')} · ${ago(t.approvedAt)}`)
+                : t.status === 'islemde' ? `${esc(t.progressBy || '')} · ${ago(t.progressAt)}`
+                    : t.status === 'bitti' ? `${esc(t.doneBy)} · ${ago(t.doneAt)}${t.cost ? ` · <b>${fmt(t.cost)} ₺</b>` : ''}`
+                        : `Reddeden ${esc(t.rejectedBy)} · ${ago(t.rejectedAt)}`;
+        const rows = [
+            t.desc && `<div class="o-note"><span>${ic} ${tn}${t.priority === 'acil' ? ' · 🔥 Acil' : ''}:</span> ${esc(t.desc)}</div>`,
+            sv && `<div class="o-note"><span>🔧 Servis:</span> ${svcLine(sv.id)}</div>`,
+            t.serviceRef && `<div class="o-note"><span>🧾 Servis kayıt no:</span> <b class="code">${esc(t.serviceRef)}</b></div>`,
+            t.visitAt && t.status === 'islemde' && `<div class="o-note"><span>📅 Randevu / teslim:</span> ${etaTxt(t.visitAt)}</div>`,
+            t.progressNote && `<div class="o-note"><span>💬 Servis notu:</span> ${esc(t.progressNote)}</div>`,
+            t.adminNote && `<div class="o-note admin"><span>🛡️ Yönetici:</span> ${esc(t.adminNote)}</div>`,
+            t.status === 'bitti' && `<div class="o-note"><span>✅ Sonuç:</span> ${RES[t.resolution] || ''}${t.resultNote ? ' · ' + esc(t.resultNote) : ''}</div>`,
+        ].filter(Boolean).join('');
+        const btns = [
+            t.status === 'talep' && canTkApprove() && `<button class="btn primary" data-act="tk-review" data-id="${t.id}">İncele ve onayla</button>`,
+            t.status === 'talep' && !canTkApprove() && t.createdBy === user.name && `<button class="btn ghost sm" data-act="tk-withdraw" data-id="${t.id}">Geri çek</button>`,
+            ['servis', 'islemde'].includes(t.status) && canTkTrack() && (sv === null || sv === void 0 ? void 0 : sv.phone) && `<a class="btn sm" href="tel:+${esc(sv.phone)}" data-act="tk-tel" data-id="${t.id}">📞 Ara</a><button class="btn wa sm" data-act="tk-wa" data-id="${t.id}">WhatsApp</button>`,
+            t.status === 'servis' && canTkTrack() && `<button class="btn ghost sm" data-act="tk-close" data-id="${t.id}">Kendimiz hallettik</button><button class="btn primary" data-act="tk-progress" data-id="${t.id}">Servis kaydını gir</button>`,
+            t.status === 'islemde' && canTkTrack() && `<button class="btn sm" data-act="tk-progress" data-id="${t.id}">Güncelle</button><button class="btn primary" data-act="tk-close" data-id="${t.id}">Sonuç gir</button>`,
+            ['servis', 'islemde'].includes(t.status) && canTkApprove() && `<button class="btn ghost sm" data-act="tk-cancel" data-id="${t.id}">İptal</button>`,
+        ].filter(Boolean).join('');
+        return `<div class="card order-card" style="padding:0;margin-bottom:12px">
+      <div class="sup-head" data-act="open-asset" data-id="${t.assetId}" style="cursor:pointer">
+        <span style="font-size:22px">${st.icon}</span>
+        <div style="flex:1;min-width:0"><div class="t">${esc((a === null || a === void 0 ? void 0 : a.name) || 'silinmiş demirbaş')} <span class="code" style="font-size:12px">${esc(t.no)}</span></div>
+          <div class="s">${esc((a === null || a === void 0 ? void 0 : a.code) || '')} · ${esc((a === null || a === void 0 ? void 0 : a.location) || '')} · ${meta}</div></div>
+        <span class="badge st-${st.tone}">${st.name}</span>
+      </div>
+      ${rows}
+      ${btns ? `<div class="sup-foot btn-row">${btns}</div>` : ''}
+    </div>`;
+    }
+    const tkText = t => {
+        const a = S.asset(t.assetId);
+        return `Merhaba, ${S.get().cafe.name} için ${t.type === 'bakim' ? 'bakım' : 'arıza'} kaydı açmak istiyoruz.\n• Cihaz: ${(a === null || a === void 0 ? void 0 : a.name) || ''}${(a === null || a === void 0 ? void 0 : a.brand) ? ' · ' + a.brand : ''}${(a === null || a === void 0 ? void 0 : a.serial) ? ' · Seri no: ' + a.serial : ''}\n• ${t.type === 'bakim' ? 'Talep' : 'Sorun'}: ${t.desc || '-'}${t.serviceRef ? '\n• Kayıt no: ' + t.serviceRef : ''}\nTeşekkürler.`;
+    };
+    function reviewTicket(id) {
+        const t = S.ticket(id), a = S.asset(t.assetId), svs = S.get().services || [];
+        sheet(`<div class="code">${esc(t.no)}</div><h3>${TTYPE[t.type][0]} ${esc((a === null || a === void 0 ? void 0 : a.name) || '')}</h3>
+      <div class="sub">${TTYPE[t.type][1]} talebi · ${esc(t.createdBy)} · ${ago(t.createdAt)}${t.priority === 'acil' ? ' · <b style="color:var(--bad)">🔥 Acil</b>' : ''}</div>
+      <div class="card small" style="box-shadow:none;background:var(--bg);margin-bottom:12px">${esc(t.desc || 'Açıklama yok')}</div>
+      <label class="field"><span>Servis</span><select id="rtSvc"><option value="">— Seçilmedi —</option>${svs.map(v => `<option value="${v.id}" ${v.id === t.serviceId ? 'selected' : ''}>${esc(v.name)}${v.topic ? ' · ' + esc(v.topic) : ''}</option>`).join('')}</select></label>
+      <label class="field"><span>🛡️ Not <em class="fhint">talep edene ve müdüre</em></span><input id="rtNote" placeholder="örn. Önce garantiye bakın · red sebebi"></label>
+      <div class="btn-row"><button class="btn danger" id="rtRej">Reddet</button><button class="btn dark" id="rtOk">Onayla · servise bildirilsin</button></div>`, sh => {
+            sh.querySelector('#rtOk').onclick = () => { S.approveTicket(id, user.name, sh.querySelector('#rtNote').value.trim(), { serviceId: sh.querySelector('#rtSvc').value || null }); closeSheet(); ui.tkTab = 'servis'; render(); toast(`${t.no} onaylandı`); };
+            sh.querySelector('#rtRej').onclick = () => { const n = sh.querySelector('#rtNote').value.trim(); if (!n && !confirm('Not yazmadan reddedilsin mi?'))
+                return; S.rejectTicket(id, user.name, n); closeSheet(); render(); toast(`${t.no} reddedildi`); };
+        });
+    }
+    function progressSheet(id) {
+        const t = S.ticket(id), a = S.asset(t.assetId), svs = S.get().services || [];
+        let visit = t.visitAt || null, vKey = '';
+        const day = n => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return d.getTime(); };
+        const draw = sh => {
+            sh.querySelectorAll('[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === vKey));
+            sh.querySelector('#pgDateChip').classList.toggle('on', vKey === 'd');
+            sh.querySelector('#pgDateTxt').textContent = vKey === 'd' && visit ? new Date(visit).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'short' }) : 'Tarih seç';
+        };
+        if (visit) {
+            const df = Math.round((new Date(visit).setHours(12, 0, 0, 0) - day(0)) / 864e5);
+            vKey = df === 0 || df === 1 ? String(df) : 'd';
+        }
+        sheet(`<h3>Servis kaydı</h3><div class="sub">${esc(t.no)} · ${esc((a === null || a === void 0 ? void 0 : a.name) || '')} — servisle konuştuktan sonra gir</div>
+      <label class="field"><span>Servis</span><select id="pgSvc"><option value="">— Seçilmedi —</option>${svs.map(v => `<option value="${v.id}" ${v.id === t.serviceId ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>🧾 Servis kayıt / iş emri no</span><input id="pgRef" value="${esc(t.serviceRef || '')}" placeholder="örn. 2026-118842"></label>
+      <div class="field"><span>Randevu / teslim tarihi</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0"><button class="chip" data-v="0">Bugün</button><button class="chip" data-v="1">Yarın</button>
+        <label class="chip date-chip" id="pgDateChip">📅 <span id="pgDateTxt">Tarih seç</span><input type="date" id="pgDate"></label></div></div>
+      <label class="radio-row"><input type="checkbox" id="pgTaken" ${t.taken ? 'checked' : ''}><span><b>Cihaz servise götürüldü</b><small>Demirbaş “Tamirde” olarak işaretlenir</small></span></label>
+      <label class="field"><span>Not</span><input id="pgNote" value="${esc(t.progressNote || '')}" placeholder="örn. Usta yarın 14:00'te gelecek · parça siparişi verildi"></label>
+      <button class="btn primary block" id="pgOk">Kaydet · işlemde</button>`, sh => {
+            draw(sh);
+            sh.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { vKey = vKey === b.dataset.v ? '' : b.dataset.v; visit = vKey ? day(+vKey) : null; sh.querySelector('#pgDate').value = ''; draw(sh); });
+            const dIn = sh.querySelector('#pgDate');
+            dIn.onclick = () => { try {
+                dIn.showPicker();
+            }
+            catch (x) { } };
+            dIn.onchange = () => { const v = dIn.value; if (v) {
+                const [y, m, d] = v.split('-').map(Number);
+                visit = new Date(y, m - 1, d, 12).getTime();
+                vKey = 'd';
+            } draw(sh); };
+            sh.querySelector('#pgOk').onclick = () => {
+                S.ticketProgress(id, user.name, { serviceId: sh.querySelector('#pgSvc').value || null, serviceRef: sh.querySelector('#pgRef').value.trim(), visitAt: visit, taken: sh.querySelector('#pgTaken').checked, note: sh.querySelector('#pgNote').value.trim() });
+                closeSheet();
+                ui.tkTab = 'islemde';
+                render();
+                toast(`${t.no} işlemde`);
+            };
+        });
+    }
+    function closeTicketSheet(id) {
+        const t = S.ticket(id), a = S.asset(t.assetId);
+        let res = t.status === 'servis' ? 'gerek_yok' : 'cozuldu';
+        const draw = sh => {
+            sh.querySelectorAll('[data-res]').forEach(b => b.classList.toggle('on', b.dataset.res === res));
+            sh.querySelector('#csScrapRow').hidden = res !== 'onarilamadi';
+            sh.querySelector('#csHint').textContent = res === 'onarilamadi' ? `Demirbaş ${sh.querySelector('#csScrap').checked ? '“Hurda”' : '“Arızalı”'} kalır.` : `Demirbaş “Aktif” olur.${t.type === 'bakim' ? ' Son bakım tarihi bugün olarak kaydedilir.' : ''}`;
+        };
+        sheet(`<h3>Sonuç</h3><div class="sub">${esc(t.no)} · ${esc((a === null || a === void 0 ? void 0 : a.name) || '')}</div>
+      <div class="chips" style="flex-wrap:wrap;margin:0 0 10px;padding:0">${Object.entries(RES).map(([k, l]) => `<button class="chip" data-res="${k}">${k === 'cozuldu' ? '✅ ' : k === 'onarilamadi' ? '🚫 ' : '👍 '}${l}</button>`).join('')}</div>
+      <label class="radio-row" id="csScrapRow" hidden><input type="checkbox" id="csScrap"><span><b>Hurdaya ayır</b><small>Tamiri mümkün değil / değmez</small></span></label>
+      <div class="small muted" id="csHint" style="margin-bottom:10px"></div>
+      <div class="field-row"><label class="field"><span>Tutar (₺)</span><input id="csCost" inputmode="decimal" placeholder="0"></label></div>
+      <label class="field"><span>Not</span><input id="csNote" placeholder="örn. Anakart değişti, 6 ay garantili"></label>
+      <button class="btn primary block" id="csOk">Kaydı kapat</button>`, sh => {
+            draw(sh);
+            sh.querySelectorAll('[data-res]').forEach(b => b.onclick = () => { res = b.dataset.res; draw(sh); });
+            sh.querySelector('#csScrap').onchange = () => draw(sh);
+            sh.querySelector('#csOk').onclick = () => {
+                S.closeTicket(id, user.name, { resolution: res, cost: num(sh.querySelector('#csCost').value || '0'), note: sh.querySelector('#csNote').value.trim(), scrap: sh.querySelector('#csScrap').checked });
+                closeSheet();
+                ui.tkTab = 'gecmis';
+                render();
+                toast(`${t.no} kapatıldı · ${RES[res]}`);
+            };
+        });
+    }
+    const editSvc = id => form(id ? 'Servisi düzenle' : 'Yeni servis', [{ k: 'name', label: 'Servis / firma adı', req: true, ph: 'örn. Samsung Yetkili Servis' }, { k: 'topic', label: 'Neye bakıyor?', ph: 'TV, klima, kahve makinesi…' },
+        [{ k: 'contact', label: 'Yetkili' }, { k: 'phone', label: 'Telefon / WhatsApp', type: 'tel', ph: '905xxxxxxxxx' }]], id ? S.service(id) : {}, v => { v.phone = v.phone.replace(/\D/g, '').replace(/^0/, '90'); S.upsert('services', Object.assign(Object.assign({}, v), { id: id || undefined })); }, id ? () => S.remove('services', id) : null);
     // ---------- karekod okuyucu (uygulama içi)
     let scanStream = null, scanTimer = null;
     const JSQR_URL = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
@@ -1388,11 +1631,15 @@ var __rest = (this && this.__rest) || function (s, e) {
                 { k: 'status', label: 'Durum', type: 'select', options: S.ASSET_STATUS.map(s => [s.id, s.name]) }],
             { k: 'location', label: 'Bulunduğu yer', list: LOCS(), ph: 'Salon, Bahçe, Okey bölümü…' },
             [{ k: 'brand', label: 'Marka/Model' }, { k: 'serial', label: 'Seri no' }],
+            [{ k: 'serviceId', label: 'Servisi', type: 'select', options: [['', '— Yok —'], ...(S.get().services || []).map(v => [v.id, v.name])] },
+                { k: 'maintEvery', label: 'Bakım (kaç ayda bir)', type: 'number', ph: '0 = yok' }],
             { k: 'note', label: 'Not' },
             ...(id ? [] : [{ k: 'count', label: 'Adet (aynı üründen birden fazla ekle)', type: 'number' }]),
         ], Object.assign({ count: 1 }, a), v => {
             const n = Math.max(1, Math.min(50, Math.round(v.count || 1)));
             delete v.count;
+            v.maintEvery = Math.max(0, Math.round(v.maintEvery || 0)) || 0;
+            v.serviceId = v.serviceId || null;
             if (id) {
                 S.saveAsset(Object.assign(Object.assign({}, v), { id }), user.name);
                 toast('Kaydedildi');
@@ -1680,6 +1927,19 @@ var __rest = (this && this.__rest) || function (s, e) {
             else if (l.action === 'kismi_teslim' && (isMine(o) || can('siparis_onay') || isDev()))
                 out.push({ id, at: l.at, icon: '⚠️', title: `${o.no} kısmen geldi`, body: `${supName(o)} · ${l.user} · kalan bekleniyor`, hash: '#/siparis', tab: 'yolda' });
         }));
+        (db.tickets || []).forEach(t => (t.log || []).forEach((l, i) => {
+            if (!l.at || l.at < since || l.user === me)
+                return;
+            const a = db.assets.find(x => x.id === t.assetId), nm = `${(a === null || a === void 0 ? void 0 : a.name) || ''} (${t.no})`, id = `t:${t.id}:${i}`, base = { at: l.at, hash: '#/demirbas', tkTab: tkTabOf(t) };
+            if (l.action === 'talep' && t.status === 'talep' && (can('servis_onay') || isDev()))
+                out.push(Object.assign(Object.assign({}, base), { id, icon: t.type === 'bakim' ? '🛠️' : '⚠️', title: `${l.user} ${t.type === 'bakim' ? 'bakım' : 'arıza'} talebi açtı${t.priority === 'acil' ? ' · ACİL' : ''}`, body: `${nm}${t.desc ? ' · ' + t.desc : ''}` }));
+            else if (l.action === 'onayladi' && t.status === 'servis' && can('servis_takip') && !isAdmin())
+                out.push(Object.assign(Object.assign({}, base), { id, icon: '📞', title: `Servise bildirilecek: ${(a === null || a === void 0 ? void 0 : a.name) || ''}`, body: `${t.no} · ${l.user} onayladı${t.priority === 'acil' ? ' · ACİL' : ''}` }));
+            else if (['onayladi', 'reddetti', 'islemde', 'bitti'].includes(l.action) && t.createdBy === me)
+                out.push(Object.assign(Object.assign({}, base), { id, icon: { onayladi: '✅', reddetti: '✖️', islemde: '🔧', bitti: '✅' }[l.action], title: `${t.no} ${{ onayladi: 'onaylandı', reddetti: 'reddedildi', islemde: 'serviste / işlemde', bitti: RES[t.resolution] || 'tamamlandı' }[l.action]}`, body: `${(a === null || a === void 0 ? void 0 : a.name) || ''}${l.note ? ' · ' + l.note : ''}` }));
+            else if (l.action === 'bitti' && (can('servis_onay') || isDev()))
+                out.push(Object.assign(Object.assign({}, base), { id, icon: t.resolution === 'onarilamadi' ? '🚫' : '✅', title: `${t.no} kapandı · ${RES[t.resolution] || ''}`, body: `${(a === null || a === void 0 ? void 0 : a.name) || ''} · ${l.user}${t.cost ? ' · ' + fmt(t.cost) + ' ₺' : ''}` }));
+        }));
         if (viewAll() || can('demirbas_yonet') || can('demirbas_durum'))
             db.assetLog.forEach(l => {
                 if (!l.at || l.at < since || l.user === me || !l.from)
@@ -1687,6 +1947,8 @@ var __rest = (this && this.__rest) || function (s, e) {
                 const a = db.assets.find(x => x.id === l.assetId);
                 if (!a)
                     return;
+                if (/^SR-\d/.test(l.note || ''))
+                    return; // servis talebinden gelen durum değişikliği: talep bildirimi yeterli
                 if (['arizali', 'kayip'].includes(l.to))
                     out.push({ id: `a:${l.id}`, at: l.at, icon: l.to === 'kayip' ? '❓' : '⚠️', title: `${a.name} ${l.to === 'kayip' ? 'kayıp' : 'arızalı'}`, body: `${a.code} · ${l.user}${l.note ? ' · ' + l.note : ''}`, hash: '#/demirbas', asset: a.id });
                 else if (l.to === 'aktif' && ['arizali', 'tamirde', 'kayip'].includes(l.from))
@@ -1712,6 +1974,10 @@ var __rest = (this && this.__rest) || function (s, e) {
         closeSheet(true);
         if (e.tab)
             ui.sipTab = e.tab;
+        if (e.tkTab) {
+            ui.aView = 'servis';
+            ui.tkTab = e.tkTab;
+        }
         if (location.hash !== e.hash)
             location.hash = e.hash;
         else
@@ -1863,6 +2129,8 @@ var __rest = (this && this.__rest) || function (s, e) {
             }).join(''), can('malzeme'));
         if (can('tedarikci') || isDev())
             out += sec('Tedarikçiler', 'new-sup', db.suppliers.map(s => `<button class="row" data-act="edit-sup" data-id="${s.id}"><div class="main"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.contact || '')} ${s.phone ? '· +' + esc(s.phone) : ''}</div></div><span class="muted">›</span></button>`).join(''), can('tedarikci'));
+        if (can('demirbas_yonet') || isDev())
+            out += sec('Servisler (arıza / bakım)', 'new-svc', (db.services || []).map(v => `<button class="row" data-act="edit-svc" data-id="${v.id}"><span style="font-size:20px">🔧</span><div class="main"><div class="t">${esc(v.name)}</div><div class="s">${esc(v.topic || '')}${v.phone ? ' · +' + esc(v.phone) : ''}</div></div><span class="muted">›</span></button>`).join(''), can('demirbas_yonet'));
         if (can('bolum') || isDev())
             out += sec('Bölümler', 'new-dept', db.depts.map(d => `<button class="row" data-act="edit-dept" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div></div><span class="muted">›</span></button>`).join(''), can('bolum'));
         if (isDev())
@@ -2458,7 +2726,8 @@ var __rest = (this && this.__rest) || function (s, e) {
         }
         if (r === 'demirbas' || r === 'd') {
             const q = document.getElementById('aQ');
-            q.oninput = () => { ui.aQ = q.value; const pos = q.selectionStart; render(); const n = document.getElementById('aQ'); n.focus(); n.setSelectionRange(pos, pos); };
+            if (q)
+                q.oninput = () => { ui.aQ = q.value; const pos = q.selectionStart; render(); const n = document.getElementById('aQ'); n.focus(); n.setSelectionRange(pos, pos); };
             if (r === 'd' && routeArg() && !document.querySelector('.sheet')) {
                 const code = routeArg();
                 setTimeout(() => openAsset(code), 50);
@@ -2603,6 +2872,26 @@ var __rest = (this && this.__rest) || function (s, e) {
             'new-item': () => editItem(null), 'manage-items': () => manageItems(id),
             'new-dept': () => editDept(null), 'edit-dept': () => editDept(id),
             'new-sup': () => editSup(null), 'edit-sup': () => editSup(id),
+            'new-svc': () => editSvc(null), 'edit-svc': () => editSvc(id),
+            'a-view': () => { ui.aView = id; render(); },
+            'tk-tab': () => { ui.tkTab = id; render(); },
+            'tk-maint': () => ticketForm(id, 'bakim', 'Periyodik bakım'),
+            'tk-review': () => reviewTicket(id),
+            'tk-progress': () => progressSheet(id),
+            'tk-close': () => closeTicketSheet(id),
+            'tk-tel': () => { if (S.ticket(id).status === 'servis')
+                S.ticketContact(id, user.name, 'tel'); setTimeout(render, 300); },
+            'tk-wa': () => { const t = S.ticket(id), sv = S.service(t.serviceId); if (t.status === 'servis')
+                S.ticketContact(id, user.name, 'wa'); window.open(`https://wa.me/${sv.phone}?text=${encodeURIComponent(tkText(t))}`, '_blank'); render(); },
+            'tk-withdraw': () => { if (confirm('Talep geri çekilsin mi?')) {
+                S.remove('tickets', id);
+                toast('Talep geri çekildi');
+            } },
+            'tk-cancel': () => { if (confirm('Servis kaydı iptal edilsin mi?')) {
+                S.rejectTicket(id, user.name, 'İptal edildi');
+                toast('İptal edildi');
+            } },
+            'go-servis': () => { ui.aView = 'servis'; ui.tkTab = id || 'talep'; },
             'new-user': () => editUser(null), 'edit-user': () => editUser(id),
             'edit-cafe': () => editCafe(),
             'go-cloud': () => { if (user)
@@ -2658,5 +2947,5 @@ var __rest = (this && this.__rest) || function (s, e) {
     render();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http'))
         navigator.serviceWorker.register('sw.js').catch(() => { });
-    window.__app = { ui, openItem, receiveSheet, editItem, editUser, events, openAddDevice, found, codeFromText, setUser: id => { user = S.user(id); render(); } }; // test için
+    window.__app = { ui, openItem, receiveSheet, editItem, editUser, events, openAddDevice, openAsset, found, codeFromText, setUser: id => { user = S.user(id); render(); } }; // test için
 })();

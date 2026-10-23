@@ -15,7 +15,7 @@ const Store = (() => {
   ];
   // gerçek kafe: boş başlar, ilk açılışta yönetici oluşturulur
   function emptyDb() {
-    return { version: 1, cafe: { ...DEFAULT_CAFE }, depts: DEFAULT_DEPTS.map(d => ({ ...d })), suppliers: [], items: [], movements: [], orders: [], users: [], assets: [], assetLog: [] };
+    return { version: 1, cafe: { ...DEFAULT_CAFE }, depts: DEFAULT_DEPTS.map(d => ({ ...d })), suppliers: [], items: [], movements: [], orders: [], users: [], assets: [], assetLog: [], services: [], tickets: [] };
   }
   const subs = new Set();
   let db = null;
@@ -155,18 +155,42 @@ const Store = (() => {
       { id: uid(), assetId: byCode('DB-0006'), from: 'arizali', to: 'tamirde', user: 'Yönetici', at: t - 3 * D, note: 'Servise gönderildi' },
       { id: uid(), assetId: byCode('DB-0007'), from: 'aktif', to: 'kayip', user: 'Mehmet', at: t - 1 * D },
     ];
-    return { assets, assetLog };
+    return { assets, assetLog, ...seedService(assets) };
+  }
+  // ---- servis (arıza / bakım) demo verisi
+  function seedService(assets) {
+    const t = now(), byCode = c => (assets.find(a => a.code === c) || {}).id;
+    const services = [
+      { id: 'sv1', name: 'Samsung Yetkili Servis', contact: 'Çağrı merkezi', phone: '908502223344', topic: 'TV / ekran' },
+      { id: 'sv2', name: 'Uydu Teknik', contact: 'Murat Usta', phone: '905321234567', topic: 'Uydu, yayın, anten' },
+      { id: 'sv3', name: 'Kahve Makinesi Servisi', contact: 'Selin Hanım', phone: '905449876543', topic: 'Espresso, değirmen' },
+    ];
+    const tv = assets.find(a => a.code === 'DB-0001'); if (tv) tv.serviceId = 'sv1';
+    const tv3 = assets.find(a => a.code === 'DB-0003'); if (tv3) tv3.serviceId = 'sv1';
+    const uy = assets.find(a => a.code === 'DB-0006'); if (uy) uy.serviceId = 'sv2';
+    const esp = assets.find(a => a.name === 'Espresso makinesi'); if (esp) Object.assign(esp, { serviceId: 'sv3', maintEvery: 3, lastMaint: t - 100 * D });
+    const tickets = [{
+      id: uid(), no: 'SR-0001', assetId: byCode('DB-0003'), type: 'ariza', priority: 'acil', status: 'talep', desc: 'HDMI girişi görüntü vermiyor, cumartesi derbi var',
+      serviceId: 'sv1', createdBy: 'Ayşe', createdAt: t - 2 * D, log: [{ at: t - 2 * D, user: 'Ayşe', action: 'talep' }],
+    }, {
+      id: uid(), no: 'SR-0002', assetId: byCode('DB-0006'), type: 'ariza', priority: 'normal', status: 'islemde', desc: 'Kanal bulmuyor',
+      serviceId: 'sv2', createdBy: 'Mehmet', createdAt: t - 4 * D, approvedBy: 'Yönetici', approvedAt: t - 3.9 * D,
+      contacts: [{ at: t - 3.5 * D, by: 'Serkan', via: 'tel' }], serviceRef: 'UYD-44821', visitAt: t + 1 * D, taken: true, progressAt: t - 3 * D, progressBy: 'Serkan',
+      log: [{ at: t - 4 * D, user: 'Mehmet', action: 'talep' }, { at: t - 3.9 * D, user: 'Yönetici', action: 'onayladi' }, { at: t - 3 * D, user: 'Serkan', action: 'islemde' }],
+    }];
+    return { services, tickets };
   }
 
   function load() {
     try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
     if (!db || db.version !== 1) { db = IS_DEMO ? seed() : emptyDb(); persist(); }
-    if (!db.assets) { Object.assign(db, IS_DEMO ? seedAssets() : { assets: [], assetLog: [] }); persist(); }
+    if (!db.assets) { Object.assign(db, IS_DEMO ? seedAssets() : { assets: [], assetLog: [], services: [], tickets: [] }); persist(); }
+    if (!db.tickets) { Object.assign(db, IS_DEMO ? seedService(db.assets) : { services: [], tickets: [] }); persist(); }
   }
   function persist() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }
   const commitHooks = new Set();
   function commit() { persist(); commitHooks.forEach(f => f(db)); subs.forEach(f => f()); }
-  const SORT = { movements: (a, b) => b.at - a.at, assetLog: (a, b) => b.at - a.at, orders: (a, b) => b.createdAt - a.createdAt };
+  const SORT = { movements: (a, b) => b.at - a.at, assetLog: (a, b) => b.at - a.at, orders: (a, b) => b.createdAt - a.createdAt, tickets: (a, b) => b.createdAt - a.createdAt };
 
   // ---- sipariş kalemi yardımcıları
   const partsOf = (o, l) => l.parts && l.parts.length ? l.parts : [{ by: o.createdBy, qty: l.qty, at: o.createdAt }];
@@ -228,12 +252,12 @@ const Store = (() => {
     // gerçek kafeyi sıfırla: kafe kimliği, bölümler ve bu yönetici kalır; diğer her şey silinir (buluttan da)
     resetCafe(keepUserId) {
       const me = db.users.find(u => u.id === keepUserId);
-      Object.assign(db, { suppliers: [], items: [], movements: [], orders: [], assets: [], assetLog: [], users: me ? [me] : [] });
+      Object.assign(db, { suppliers: [], items: [], movements: [], orders: [], assets: [], assetLog: [], services: [], tickets: [], users: me ? [me] : [] });
       commit();
     },
     // ---- bulut senkronu için (sync.js kullanır)
     onCommit: f => (commitHooks.add(f), () => commitHooks.delete(f)),
-    COLLS: ['depts', 'suppliers', 'items', 'movements', 'orders', 'users', 'assets', 'assetLog'],
+    COLLS: ['depts', 'suppliers', 'items', 'movements', 'orders', 'users', 'assets', 'assetLog', 'services', 'tickets'],
     applyRemote(coll, id, data) { // buluttan gelen tek kayıt; push tetiklemez
       if (coll === 'meta') { if (id === 'cafe' && data) db.cafe = data; return; }
       const list = db[coll] || (db[coll] = []);
@@ -242,13 +266,13 @@ const Store = (() => {
     },
     finishRemote() { Object.entries(SORT).forEach(([c, f]) => db[c]?.sort(f)); persist(); subs.forEach(f => f()); },
     emptyForJoin() { // katılan cihaz: yerel veriyi boşalt, buluttan doldurulacak
-      db = { version: 1, cafe: { name: db.cafe?.name || 'Kafe' }, depts: [], suppliers: [], items: [], movements: [], orders: [], users: [], assets: [], assetLog: [] };
+      db = { version: 1, cafe: { name: db.cafe?.name || 'Kafe' }, depts: [], suppliers: [], items: [], movements: [], orders: [], users: [], assets: [], assetLog: [], services: [], tickets: [] };
       persist(); subs.forEach(f => f());
     },
     wipeDemo(adminPin) { // bulutu boş kurarken: bölümler, kafe kimliği ve yönetici kalır
       const admin = db.users.find(u => u.role === 'yonetici') || { id: uid(), name: 'Yönetici', role: 'yonetici', deptIds: [] };
       admin.pin = adminPin || admin.pin;
-      Object.assign(db, { suppliers: [], items: [], movements: [], orders: [], assets: [], assetLog: [], users: [admin] });
+      Object.assign(db, { suppliers: [], items: [], movements: [], orders: [], assets: [], assetLog: [], services: [], tickets: [], users: [admin] });
       persist(); subs.forEach(f => f());
     },
     subscribe: f => (subs.add(f), () => subs.delete(f)),
@@ -511,6 +535,75 @@ const Store = (() => {
       a.status = status; a.updatedAt = now(); if (note) a.note = note; commit();
     },
     removeAsset(id) { db.assets = db.assets.filter(a => a.id !== id); commit(); },
+
+    // ---- servis talepleri (arıza / bakım): talep → onay → servis (iletişim) → işlemde → bitti | red
+    service: id => (db.services || []).find(s => s.id === id),
+    ticket: id => (db.tickets || []).find(t => t.id === id),
+    openTicketFor: assetId => (db.tickets || []).find(t => t.assetId === assetId && !['bitti', 'red'].includes(t.status)),
+    // bakım zamanı: maintEvery (ay) + lastMaint; null = bakım takibi yok
+    maintDue(a) {
+      if (!a.maintEvery) return null;
+      const base = a.lastMaint || a.createdAt || now();
+      const d = new Date(base); d.setMonth(d.getMonth() + Number(a.maintEvery));
+      return d.getTime();
+    },
+    nextTicketNo() {
+      const max = (db.tickets || []).reduce((m, t) => Math.max(m, parseInt(String(t.no || '').replace(/\D/g, '')) || 0), 0);
+      return 'SR-' + String(max + 1).padStart(4, '0');
+    },
+    createTicket(f, user, autoApprove = false) {
+      const t = now(), a = this.asset(f.assetId); if (!a) return;
+      const tk = { id: uid(), no: this.nextTicketNo(), assetId: a.id, type: f.type || 'ariza', priority: f.priority || 'normal', status: autoApprove ? 'servis' : 'talep',
+        desc: f.desc || '', serviceId: f.serviceId || a.serviceId || null, createdBy: user, createdAt: t, log: [{ at: t, user, action: 'talep' }] };
+      if (autoApprove) { Object.assign(tk, { approvedBy: user, approvedAt: t }); tk.log.push({ at: t, user, action: 'onayladi' }); }
+      (db.tickets ||= []).unshift(tk);
+      if (tk.type === 'ariza' && a.status === 'aktif') {
+        db.assetLog.unshift({ id: uid(), assetId: a.id, from: a.status, to: 'arizali', user, at: t, note: `${tk.no} · ${tk.desc || 'Arıza bildirildi'}` });
+        a.status = 'arizali'; a.note = tk.desc || a.note; a.updatedAt = t;
+      }
+      commit(); return tk;
+    },
+    approveTicket(id, user, note, patch = {}) {
+      const tk = this.ticket(id); if (!tk) return;
+      Object.assign(tk, patch, { status: 'servis', approvedBy: user, approvedAt: now(), adminNote: note || tk.adminNote || '' });
+      tk.log.push({ at: now(), user, action: 'onayladi', note: note || '' }); commit(); return tk;
+    },
+    rejectTicket(id, user, note) {
+      const tk = this.ticket(id); if (!tk) return;
+      Object.assign(tk, { status: 'red', rejectedBy: user, rejectedAt: now(), adminNote: note || '' });
+      tk.log.push({ at: now(), user, action: 'reddetti', note: note || '' }); commit(); return tk;
+    },
+    ticketContact(id, user, via) {
+      const tk = this.ticket(id); if (!tk) return;
+      (tk.contacts ||= []).push({ at: now(), by: user, via });
+      tk.log.push({ at: now(), user, action: 'iletti', via }); commit(); return tk;
+    },
+    // servis kaydı açıldı: kayıt no, randevu, cihaz servise götürüldü mü
+    ticketProgress(id, user, p = {}) {
+      const tk = this.ticket(id); if (!tk) return;
+      const first = tk.status !== 'islemde';
+      Object.assign(tk, { status: 'islemde', serviceRef: p.serviceRef ?? tk.serviceRef ?? '', visitAt: p.visitAt ?? tk.visitAt ?? null, taken: !!p.taken,
+        serviceId: p.serviceId || tk.serviceId, progressNote: p.note ?? tk.progressNote ?? '', progressAt: now(), progressBy: user });
+      tk.log.push({ at: now(), user, action: first ? 'islemde' : 'guncelledi', note: p.note || '' });
+      const a = this.asset(tk.assetId);
+      if (a && p.taken && a.status !== 'tamirde') this.setAssetStatus(a.id, 'tamirde', user, `${tk.no} · servise götürüldü${tk.serviceRef ? ' (' + tk.serviceRef + ')' : ''}`);
+      else commit();
+      return tk;
+    },
+    // sonuç: cozuldu (aktif) | onarilamadi (hurda/arızalı) | gerek_yok
+    closeTicket(id, user, r = {}) {
+      const tk = this.ticket(id); if (!tk) return;
+      Object.assign(tk, { status: 'bitti', resolution: r.resolution || 'cozuldu', cost: Number(r.cost) || 0, resultNote: r.note || '', doneBy: user, doneAt: now() });
+      tk.log.push({ at: now(), user, action: 'bitti', resolution: tk.resolution, cost: tk.cost });
+      const a = this.asset(tk.assetId);
+      if (a) {
+        if (tk.type === 'bakim' && tk.resolution !== 'onarilamadi') a.lastMaint = now();
+        const to = tk.resolution === 'onarilamadi' ? (r.scrap ? 'hurda' : 'arizali') : 'aktif';
+        if (a.status !== to) { this.setAssetStatus(a.id, to, user, `${tk.no} · ${tk.resolution === 'onarilamadi' ? 'onarılamadı' : tk.type === 'bakim' ? 'bakım yapıldı' : 'arıza giderildi'}${r.note ? ' · ' + r.note : ''}`); return tk; }
+        a.updatedAt = now();
+      }
+      commit(); return tk;
+    },
     exportJSON: () => JSON.stringify(db, null, 2),
     reset() { db = IS_DEMO ? seed() : emptyDb(); commit(); },
   };
