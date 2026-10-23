@@ -22,6 +22,8 @@ const Store = (() => {
 
   const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-5);
   const now = () => Date.now();
+  // siparişte bu kalem için hâlâ beklenen miktar (kısmi teslim / iade sonrası)
+  const lineLeft = l => l.closed ? 0 : Math.max(0, (Number(l.qty) || 0) - (Number(l.received) || 0));
   const H = 3600e3, D = 24 * H;
 
   function seed() {
@@ -273,7 +275,7 @@ const Store = (() => {
     // sipariş
     pendingQtyFor(itemId, statuses = ['onay', 'verildi']) {
       return db.orders.filter(o => statuses.includes(o.status))
-        .reduce((s, o) => s + (o.lines.find(l => l.itemId === itemId)?.qty || 0), 0);
+        .reduce((s, o) => { const l = o.lines.find(x => x.itemId === itemId); return s + (l ? (o.status === 'verildi' ? lineLeft(l) : l.qty) : 0); }, 0);
     },
     nextOrderNo() {
       const max = db.orders.reduce((m, o) => Math.max(m, parseInt(String(o.no || '').replace(/\D/g, '')) || 0), 0);
@@ -362,16 +364,40 @@ const Store = (() => {
       Object.assign(o, { status: 'red', adminNote: adminNote || o.adminNote, rejectedBy: user, rejectedAt: now() });
       o.log.push({ at: now(), user, action: 'reddetti', note: o.adminNote }); commit(); return o;
     },
-    receiveOrder(orderId, received, user) { // received: {itemId: qty}
+    lineLeft,
+    // Teslim alma. rec: {itemId: sayı | {qty, reason, note}}
+    //  reason: 'eksik' (eksik geldi) | 'begenmedim' (iade) | 'hasarli' (iade)
+    //  keepOpen: eksik kalan miktar sonra gelecek → sipariş "yolda" kalır, sadece kalan bekler
+    receiveOrder(orderId, rec, user, keepOpen = false) {
       const o = db.orders.find(x => x.id === orderId); if (!o) return;
+      let short = false;
       o.lines.forEach(l => {
-        const q = Number(received[l.itemId] ?? l.qty) || 0;
-        l.received = q;
+        const left = lineLeft(l); if (left <= 0) return;
+        const r = rec[l.itemId], v = r != null && typeof r === 'object' ? r : { qty: r };
+        const q = Math.max(0, Number(v.qty ?? left) || 0);
+        l.received = (l.received || 0) + q;
+        (l.recv ||= []).push({ qty: q, at: now(), by: user });
+        if (q < left) {
+          short = true;
+          const reason = v.reason || 'eksik';
+          (l.issues ||= []).push({ qty: left - q, reason, note: v.note || '', by: user, at: now() });
+          if (reason !== 'eksik' || !keepOpen) l.closed = true; // iade edilen / gelmeyecek miktar artık beklenmez
+        }
         const it = this.item(l.itemId);
-        if (it && q > 0) this.setQty(it.id, it.qty + q, user, 'giris', 'Sipariş teslim');
+        if (it && q > 0) this.setQty(it.id, it.qty + q, user, 'giris', `Sipariş teslim (${o.no || ''})`);
       });
-      o.status = 'teslim'; o.receivedAt = now(); o.receivedBy = user;
-      (o.log ||= []).push({ at: now(), user, action: 'teslim_aldi' }); commit();
+      const waiting = o.lines.some(l => lineLeft(l) > 0);
+      if (short) o.short = true;
+      if (waiting) { o.partial = true; (o.log ||= []).push({ at: now(), user, action: 'kismi_teslim' }); }
+      else { o.status = 'teslim'; o.receivedAt = now(); o.receivedBy = user; (o.log ||= []).push({ at: now(), user, action: 'teslim_aldi', short: !!o.short }); }
+      commit(); return o;
+    },
+    // kısmen gelen siparişte kalanı bekleme: kalanları "gelmedi" diye kapatır
+    closeRest(orderId, user) {
+      const o = db.orders.find(x => x.id === orderId); if (!o) return;
+      o.lines.forEach(l => { const left = lineLeft(l); if (left > 0) { (l.issues ||= []).push({ qty: left, reason: 'gelmedi', note: '', by: user, at: now() }); l.closed = true; } });
+      Object.assign(o, { status: 'teslim', short: true, receivedAt: now(), receivedBy: user });
+      (o.log ||= []).push({ at: now(), user, action: 'teslim_aldi', short: true }); commit(); return o;
     },
     cancelOrder(orderId) {
       db.orders = db.orders.filter(o => o.id !== orderId); commit();

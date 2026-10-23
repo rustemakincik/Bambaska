@@ -743,7 +743,7 @@
         S.partsOf(o, l).forEach(p => m.set(p.by, (m.get(p.by) || 0) + p.qty));
         return m.size > 1 ? [...m].map(([n, q]) => `${n} ${fmt(q)}`).join(' · ') : [...m.keys()][0];
     };
-    const LOG_TXT = { ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı' };
+    const LOG_TXT = { ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı', kismi_teslim: 'kısmen teslim aldı' };
     const visibleOrders = () => S.get().orders.filter(o => viewAll() || can('siparis_onay') || can('siparis_direkt') || isMine(o)
         || (can('teslim') && ['verildi', 'teslim'].includes(o.status)));
     const myNeeds = () => {
@@ -815,8 +815,22 @@
       <button class="btn block" data-act="pdf-draft" ${anySel ? '' : 'disabled'}>📄 Seçili listeyi PDF al</button>
       <div class="small muted" style="text-align:center;margin-top:8px">Önerilen miktar = hedef − eldeki. İstersen değiştir.</div>`;
     }
+    function lineQtyHTML(o, l, it) {
+        const u = esc((it === null || it === void 0 ? void 0 : it.unit) || ''), iss = l.issues || [];
+        if (l.received == null && !iss.length)
+            return `<b>${fmt(l.qty)} ${u}</b>`;
+        const got = l.received || 0, left = o.status === 'verildi' ? S.lineLeft(l) : 0;
+        if (!iss.length && !left && got === l.qty)
+            return `<b>${fmt(got)} ${u}</b>`;
+        return `<div class="lq"><b>${fmt(got)} / ${fmt(l.qty)} ${u}</b>
+      ${iss.map(x => `<span class="iss iss-${x.reason}">${fmt(x.qty)} ${RSN[x.reason] || x.reason}${x.note ? ' · ' + esc(x.note) : ''}</span>`).join('')}
+      ${left ? `<span class="iss iss-wait">${fmt(left)} bekleniyor</span>` : ''}</div>`;
+    }
     function orderCard(o) {
-        const sup = S.supplier(o.supplierId), st = OST[o.status] || OST.verildi;
+        const sup = S.supplier(o.supplierId);
+        const st = o.status === 'verildi' && o.partial ? { name: 'Kısmen geldi · kalan yolda', tone: 'azaliyor', icon: '🚚' }
+            : o.status === 'teslim' && o.short ? { name: 'Eksik / iadeli teslim', tone: 'azaliyor', icon: '⚠️' }
+                : OST[o.status] || OST.verildi;
         const total = o.lines.length;
         const meta = o.status === 'teslim' ? `Teslim: ${ago(o.receivedAt)} · ${esc(o.receivedBy)}`
             : o.status === 'red' ? `Reddeden: ${esc(o.rejectedBy)} · ${ago(o.rejectedAt)}`
@@ -829,7 +843,7 @@
           <div class="s">${meta}</div></div>
         <span class="badge st-${st.tone}">${st.name}</span>
       </div>
-      ${o.lines.slice(0, 10).map(l => { var _a; const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc((it === null || it === void 0 ? void 0 : it.name) || 'silinmiş malzeme')}${o.status === 'onay' || contributors(o).length > 1 ? lineMeta(o, l) : ''}</div><b>${fmt((_a = l.received) !== null && _a !== void 0 ? _a : l.qty)} ${esc((it === null || it === void 0 ? void 0 : it.unit) || '')}</b></div>`; }).join('')}
+      ${o.lines.slice(0, 10).map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc((it === null || it === void 0 ? void 0 : it.name) || 'silinmiş malzeme')}${o.status === 'onay' || contributors(o).length > 1 ? lineMeta(o, l) : ''}</div>${lineQtyHTML(o, l, it)}</div>`; }).join('')}
       ${total > 10 ? `<div class="order-line small muted">+ ${total - 10} kalem daha</div>` : ''}
       ${noteList(o).map(n => `<div class="o-note"><span>💬 ${esc(n.by)}:</span> ${esc(n.text)}</div>`).join('')}
       ${o.adminNote ? `<div class="o-note admin"><span>🛡️ Yöneticiden personele:</span> ${esc(o.adminNote)}</div>` : ''}
@@ -838,8 +852,9 @@
         <button class="btn sm" data-act="pdf-order" data-id="${o.id}">📄 PDF</button>
         ${o.status === 'onay' && can('siparis_onay') ? `<button class="btn primary" data-act="review-order" data-id="${o.id}">İncele ve onayla</button>` : ''}
         ${o.status === 'onay' && !can('siparis_onay') && isMine(o) ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">Geri çek</button>` : ''}
-        ${o.status === 'verildi' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${can('teslim') ? `<button class="btn primary" data-act="receive" data-id="${o.id}">Teslim aldım</button>` : ''}` : ''}
+        ${o.status === 'verildi' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${o.partial && can('teslim') ? `<button class="btn ghost sm" data-act="close-rest" data-id="${o.id}">Kalanı bekleme</button>` : ''}${can('teslim') ? `<button class="btn primary" data-act="receive" data-id="${o.id}">${o.partial ? 'Kalanı teslim al' : 'Teslim aldım'}</button>` : ''}` : ''}
       </div>
+      ${hasIssues(o) && (sup === null || sup === void 0 ? void 0 : sup.phone) && (can('teslim') || can('siparis_onay')) && !readOnly() ? `<div class="sup-foot2"><button class="btn wa block" data-act="wa-issue" data-id="${o.id}">Eksik / iadeyi tedarikçiye WhatsApp'la bildir</button></div>` : ''}
     </div>`;
     }
     // yönetici onay ekranı: miktar değiştir, kalem ekle/çıkar, not yaz, onayla/reddet
@@ -1515,7 +1530,9 @@
             else if (l.action === 'reddetti' && isMine(o))
                 out.push({ id, at: l.at, icon: '✖️', title: `${o.no} reddedildi`, body: o.adminNote || supName(o), hash: '#/siparis', tab: 'gecmis' });
             else if (l.action === 'teslim_aldi' && (isMine(o) || can('siparis_onay') || isDev()))
-                out.push({ id, at: l.at, icon: '📦', title: `${o.no} teslim alındı`, body: `${supName(o)} · ${l.user}`, hash: '#/siparis', tab: 'gecmis' });
+                out.push({ id, at: l.at, icon: l.short ? '⚠️' : '📦', title: `${o.no} ${l.short ? 'eksik/iadeli teslim alındı' : 'teslim alındı'}`, body: `${supName(o)} · ${l.user}`, hash: '#/siparis', tab: 'gecmis' });
+            else if (l.action === 'kismi_teslim' && (isMine(o) || can('siparis_onay') || isDev()))
+                out.push({ id, at: l.at, icon: '⚠️', title: `${o.no} kısmen geldi`, body: `${supName(o)} · ${l.user} · kalan bekleniyor`, hash: '#/siparis', tab: 'yolda' });
         }));
         if (viewAll() || can('demirbas_yonet') || can('demirbas_durum'))
             db.assetLog.forEach(l => {
@@ -1753,7 +1770,7 @@
         const hist = S.get().movements.filter(m => m.itemId === id).slice(0, 5);
         const canCount = canCountDept(it.deptId);
         const onay = S.pendingQtyFor(id, ['onay']), yol = S.pendingQtyFor(id, ['verildi']);
-        const open = S.get().orders.filter(o => ['onay', 'verildi'].includes(o.status) && o.lines.some(l => l.itemId === id));
+        const open = S.get().orders.filter(o => ['onay', 'verildi'].includes(o.status) && o.lines.some(l => l.itemId === id && (o.status === 'onay' || S.lineLeft(l) > 0)));
         const canOrder = (can('siparis_hazirla') || can('siparis_direkt')) && sup;
         const gap = Math.max(it.target - it.qty - onay - yol, 0);
         let v = it.qty, oq = gap > 0 ? Math.ceil(gap * 2) / 2 : 0;
@@ -1779,7 +1796,7 @@
             var _a;
             const l = o.lines.find(x => x.itemId === id), os = OST[o.status];
             return `<div class="row"><span class="lg-dot ${o.status === 'onay' ? 'seg-onay' : 'seg-yol'}"></span>
-          <div class="main"><div class="t">${esc(o.no)} · ${fmt(l.qty)} ${esc(it.unit)}</div><div class="s">${esc(((_a = S.supplier(o.supplierId)) === null || _a === void 0 ? void 0 : _a.name) || '')} · ${esc(o.createdBy)} · ${ago(o.createdAt)}</div></div>
+          <div class="main"><div class="t">${esc(o.no)} · ${fmt(o.status === 'verildi' ? S.lineLeft(l) : l.qty)} ${esc(it.unit)}${o.status === 'verildi' && l.received ? ` <span class="small muted">(${fmt(l.received)} geldi)</span>` : ''}</div><div class="s">${esc(((_a = S.supplier(o.supplierId)) === null || _a === void 0 ? void 0 : _a.name) || '')} · ${esc(o.createdBy)} · ${ago(o.createdAt)}</div></div>
           ${o.status === 'verildi' && can('teslim') ? `<button class="btn primary sm" data-recv="${o.id}">Teslim al</button>`
                 : o.status === 'onay' && can('siparis_onay') ? `<button class="btn sm" data-rev="${o.id}">İncele</button>` : `<span class="badge st-${os.tone}">${os.name}</span>`}
         </div>`;
@@ -1986,23 +2003,106 @@
             draw();
         });
     }
+    const RSN = { eksik: 'Eksik geldi', begenmedim: 'Beğenmedim · iade', hasarli: 'Hasarlı · iade', gelmedi: 'Gelmedi' };
     function receiveSheet(oid, after) {
-        const o = S.get().orders.find(x => x.id === oid), sup = S.supplier(o.supplierId);
-        sheet(`<h3>Teslim al</h3><div class="sub">${esc((sup === null || sup === void 0 ? void 0 : sup.name) || '')} · gelen miktarları kontrol et, stoğa eklenecek</div>
-      <div class="list">${o.lines.map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main"><div class="t" style="font-weight:600">${esc(it === null || it === void 0 ? void 0 : it.name)}</div><div class="small muted">Sipariş: ${fmt(l.qty)} · elde ${fmt(it === null || it === void 0 ? void 0 : it.qty)}</div></div><input class="num" inputmode="decimal" data-rq="${l.itemId}" value="${fmt(l.qty)}"><span class="small muted" style="width:38px">${esc(it === null || it === void 0 ? void 0 : it.unit)}</span></div>`; }).join('')}</div>
-      <button class="btn primary block" style="margin-top:14px" id="rcv">Stoğa ekle</button>`, sh => {
+        const o = S.order(oid), sup = S.supplier(o.supplierId);
+        const lines = o.lines.filter(l => S.lineLeft(l) > 0);
+        const st = {};
+        lines.forEach(l => st[l.itemId] = { qty: S.lineLeft(l), reason: 'eksik', note: '' });
+        const lineHTML = l => {
+            const it = S.item(l.itemId), left = S.lineLeft(l), v = st[l.itemId], miss = left - v.qty;
+            return `<div class="rcv-line ${miss > 0 ? 'short' : ''}" data-line="${l.itemId}">
+        <div class="rcv-top"><div class="main"><div class="t" style="font-weight:600">${esc((it === null || it === void 0 ? void 0 : it.name) || 'silinmiş malzeme')}</div>
+          <div class="small muted">${l.received ? `Sipariş ${fmt(l.qty)} · önce gelen ${fmt(l.received)} · bekleyen <b>${fmt(left)}</b>` : `Sipariş: <b>${fmt(left)}</b>`} ${esc((it === null || it === void 0 ? void 0 : it.unit) || '')}</div></div>
+          <div class="stepper"><button data-rs="-1">−</button><input class="num" inputmode="decimal" data-rq value="${fmt(v.qty)}"><button data-rs="1">+</button></div></div>
+        <div class="rcv-q">
+          <button class="chip ${miss <= 0 ? 'on' : ''}" data-all>✓ Tamam geldi</button>
+          <button class="chip ${v.qty === 0 ? 'on' : ''}" data-none>Hiç gelmedi / almadım</button>
+        </div>
+        ${miss > 0 ? `<div class="rcv-why"><div class="small"><b>${fmt(miss)} ${esc((it === null || it === void 0 ? void 0 : it.unit) || '')}</b> teslim alınmıyor. Neden?</div>
+          <div class="chips">${['eksik', 'begenmedim', 'hasarli'].map(r => `<button class="chip ${v.reason === r ? 'on' : ''}" data-why="${r}">${RSN[r]}</button>`).join('')}</div>
+          <input class="note-in" data-rn placeholder="Kısa not (isteğe bağlı) · örn. tütün nemliydi" value="${esc(v.note)}"></div>` : ''}
+      </div>`;
+        };
+        const draw = sh => {
+            const anyShort = lines.some(l => st[l.itemId].qty < S.lineLeft(l));
+            const anyEksik = lines.some(l => st[l.itemId].qty < S.lineLeft(l) && st[l.itemId].reason === 'eksik');
+            if (ui.rcvOpen == null)
+                ui.rcvOpen = true;
+            sh.querySelector('#rcvLines').innerHTML = lines.map(lineHTML).join('');
+            sh.querySelector('#rcvOpt').innerHTML = anyEksik ? `<div class="card rcv-opt"><div class="small" style="font-weight:700;margin-bottom:6px">Eksik kalanlar ne olacak?</div>
+          <label class="radio-row"><input type="radio" name="ro" value="1" ${ui.rcvOpen ? 'checked' : ''}><span><b>Sonra gelecek</b><small>Sipariş "yolda" kalır, sadece eksik miktar beklenir</small></span></label>
+          <label class="radio-row"><input type="radio" name="ro" value="0" ${!ui.rcvOpen ? 'checked' : ''}><span><b>Gelmeyecek, siparişi kapat</b><small>Eksik miktar, stok azsa tekrar sipariş listesine düşer</small></span></label></div>`
+                : anyShort ? `<div class="card small muted rcv-opt">İade edilen miktar stoğa eklenmez; stok azsa malzeme tekrar sipariş listesine düşer.</div>` : '';
+            sh.querySelector('#rcv').textContent = anyShort ? 'Gelenleri stoğa ekle' : 'Hepsi tamam · stoğa ekle';
+        };
+        ui.rcvOpen = true;
+        sheet(`<h3>Teslim al</h3><div class="sub">${esc((sup === null || sup === void 0 ? void 0 : sup.name) || '')} · ${esc(o.no || '')} · gelen miktarı kontrol et. Eksik ya da beğenmediğin ürünü azalt.</div>
+      <div id="rcvLines"></div><div id="rcvOpt"></div>
+      <button class="btn primary block" style="margin-top:14px" id="rcv"></button>`, sh => {
+            draw(sh);
+            const lineOf = e => { const el = e.target.closest('[data-line]'); return el && [el, lines.find(l => l.itemId === el.dataset.line)]; };
+            sh.addEventListener('click', e => {
+                const r = lineOf(e);
+                if (!r)
+                    return;
+                const [el, l] = r, v = st[l.itemId], left = S.lineLeft(l);
+                const b = e.target.closest('button');
+                if (!b)
+                    return;
+                if (b.dataset.rs)
+                    v.qty = Math.min(left, Math.max(0, v.qty + Number(b.dataset.rs)));
+                else if ('all' in b.dataset)
+                    v.qty = left;
+                else if ('none' in b.dataset)
+                    v.qty = 0;
+                else if (b.dataset.why)
+                    v.reason = b.dataset.why;
+                else
+                    return;
+                draw(sh);
+            });
+            sh.addEventListener('change', e => {
+                if (e.target.name === 'ro') {
+                    ui.rcvOpen = e.target.value === '1';
+                    return;
+                }
+                const r = lineOf(e);
+                if (!r)
+                    return;
+                const [, l] = r, v = st[l.itemId];
+                if ('rq' in e.target.dataset) {
+                    v.qty = Math.min(S.lineLeft(l), Math.max(0, num(e.target.value)));
+                    setTimeout(() => draw(sh), 0);
+                }
+            });
+            sh.addEventListener('input', e => {
+                const r = lineOf(e);
+                if (!r)
+                    return;
+                if ('rn' in e.target.dataset)
+                    st[r[1].itemId].note = e.target.value;
+                if ('rq' in e.target.dataset)
+                    st[r[1].itemId].qty = Math.min(S.lineLeft(r[1]), Math.max(0, num(e.target.value)));
+            });
             sh.querySelector('#rcv').onclick = () => {
-                const rec = {};
-                sh.querySelectorAll('[data-rq]').forEach(i => rec[i.dataset.rq] = num(i.value));
-                S.receiveOrder(oid, rec, user.name);
+                const res = S.receiveOrder(oid, st, user.name, ui.rcvOpen);
                 closeSheet();
                 render();
-                toast('Teslim alındı, stok güncellendi');
+                toast(res.status === 'teslim' ? (res.short ? 'Teslim alındı · eksik/iade kaydedildi' : 'Teslim alındı, stok güncellendi') : 'Gelenler stoğa eklendi · kalan bekleniyor');
                 if (after)
                     setTimeout(after, 280);
             };
         });
     }
+    // tedarikçiye eksik / iade bildirimi
+    function issueText(o) {
+        const L = [];
+        o.lines.forEach(l => (l.issues || []).forEach(x => { const it = S.item(l.itemId); L.push(`• ${(it === null || it === void 0 ? void 0 : it.name) || '?'}: ${fmt(x.qty)} ${(it === null || it === void 0 ? void 0 : it.unit) || ''} — ${RSN[x.reason] || x.reason}${x.note ? ' (' + x.note + ')' : ''}`); }));
+        return `Merhaba, ${S.get().cafe.name} — ${o.no} siparişi hakkında:\n${L.join('\n')}\n` +
+            (o.status === 'verildi' && o.lines.some(l => S.lineLeft(l) > 0) ? 'Eksikleri bekliyoruz.\n' : '') + 'Teşekkürler.';
+    }
+    const hasIssues = o => o.lines.some(l => l.issues && l.issues.length);
     // ---------- olaylar
     function afterRender(r) {
         if (r === 'stok') {
@@ -2107,6 +2207,12 @@
             'doc-back': () => { location.hash = '#/siparis'; },
             'go-onay': () => { ui.sipTab = 'onay'; },
             receive: () => receiveSheet(id),
+            'close-rest': () => { if (confirm('Kalan miktarlar gelmeyecek olarak kapatılsın mı?')) {
+                S.closeRest(id, user.name);
+                render();
+                toast('Sipariş kapatıldı · eksikler kaydedildi');
+            } },
+            'wa-issue': () => { const o = S.order(id); window.open(`https://wa.me/${S.supplier(o.supplierId).phone}?text=${encodeURIComponent(issueText(o))}`, '_blank'); },
             'cancel-order': () => {
                 const o = S.order(id);
                 if (!o)

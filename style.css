@@ -629,3 +629,27 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .nfg .demo-banner > * + * { margin-left: 6px; }
 .nfg .stat-grid, .nfg .grid2 { grid-gap: 10px; }
 .nfg .pin-dots > * + * { margin-left: 16px; }
+
+/* teslim alma: eksik / iade */
+.rcv-line { border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 10px; background: var(--card); }
+.rcv-line.short { border-color: var(--warn, #d08a00); }
+.rcv-top { display: flex; align-items: center; gap: 10px; }
+.rcv-top .main { flex: 1; min-width: 0; }
+.rcv-top .stepper input { width: 58px; }
+.rcv-q { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.nfg .rcv-q > * + * { margin-left: 6px; }
+.rcv-q .chip, .rcv-why .chip { font-size: 12.5px; padding: 6px 10px; }
+.rcv-why { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.rcv-why .chips { margin: 6px 0 8px; }
+.rcv-opt { margin-top: 4px; }
+.lq { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.iss { font-size: 11.5px; font-weight: 600; padding: 2px 7px; border-radius: 8px; margin-top: 3px; background: var(--bg); color: var(--muted); }
+.iss-eksik, .iss-gelmedi { background: rgba(208,138,0,.14); color: #a86b00; }
+.iss-begenmedim, .iss-hasarli { background: rgba(214,48,49,.12); color: #c0392b; }
+.iss-wait { background: var(--accent-soft); color: var(--accent); }
+.sup-foot.btn-row { flex-wrap: wrap; row-gap: 8px; }
+.sup-foot.btn-row > * { flex: 1 1 auto; }
+.sup-foot2 { padding: 0 14px 14px; }
+.nfg .sup-foot.btn-row > * { margin-bottom: 8px; }
+.rcv-why .chips { flex-wrap: wrap; overflow: visible; padding: 0; margin-left: 0; margin-right: 0; }
+.nfg .rcv-why .chips > * { margin-bottom: 6px; }
