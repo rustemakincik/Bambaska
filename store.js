@@ -27,6 +27,7 @@ const Store = (() => {
     let db = null;
     const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-5);
     const now = () => Date.now();
+    const SHOP = '__shop', SHOP_SUP = { id: '__shop', name: 'Alışveriş listesi', mode: 'pickup', virtual: true };
     // siparişte bu kalem için hâlâ beklenen miktar (kısmi teslim / iade sonrası)
     const lineLeft = l => l.closed ? 0 : Math.max(0, (Number(l.qty) || 0) - (Number(l.received) || 0));
     const H = 3600e3, D = 24 * H;
@@ -41,8 +42,10 @@ const Store = (() => {
         const suppliers = [
             { id: 's1', name: 'Tütün Toptancısı', contact: 'Ahmet Bey', phone: '905321112233' },
             { id: 's2', name: 'Kömür Bayii', contact: 'Hasan', phone: '905334445566' },
-            { id: 's3', name: 'Toptan Market', contact: 'Sipariş hattı', phone: '905057778899', mode: 'pickup' },
+            { id: 's3', name: 'Toptan Market', contact: 'Sipariş hattı', phone: '905057778899' },
             { id: 's4', name: 'Süt & Fırın', contact: 'Kemal', phone: '905441234567' },
+            { id: 's5', name: 'Metro Market', contact: 'Gidip alınır', phone: '', mode: 'pickup' },
+            { id: 's6', name: 'Sebze Hali', contact: 'Gidip alınır', phone: '', mode: 'pickup' },
         ];
         const I = (deptId, name, unit, qty, min, target, supplierId) => ({ id: uid(), deptId, name, unit, qty, min, target, supplierId, updatedAt: t - Math.random() * 2 * D, updatedBy: 'Mehmet' });
         const items = [
@@ -62,10 +65,11 @@ const Store = (() => {
             I('bar', 'Süt', 'lt', 12, 10, 30, 's4'),
             I('bar', 'Küp şeker', 'kutu', 7, 4, 12, 's3'),
             I('bar', 'Karton bardak', 'koli', 1, 1, 4, 's3'),
-            I('bar', 'Limon', 'kg', 3, 2, 5, 's3'),
+            I('bar', 'Limon', 'kg', 1, 2, 5, 's6'),
+            I('bar', 'Taze nane', 'demet', 1, 2, 6, 's6'),
             I('mutfak', 'Tost ekmeği', 'paket', 3, 4, 12, 's4'),
-            I('mutfak', 'Kaşar peyniri', 'kg', 4, 2, 6, 's3'),
-            I('mutfak', 'Sucuk', 'kg', 2, 1.5, 4, 's3'),
+            I('mutfak', 'Kaşar peyniri', 'kg', 1.5, 2, 6, 's5'),
+            I('mutfak', 'Sucuk', 'kg', 1, 1.5, 4, 's5'),
             I('mutfak', 'Dondurulmuş patates', 'kg', 10, 5, 20, 's3'),
             I('mutfak', 'Sıvı yağ', 'lt', 6, 5, 15, 's3'),
             I('genel', 'Peçete', 'koli', 2, 1, 4, 's3'),
@@ -304,7 +308,10 @@ const Store = (() => {
         get: () => db,
         status, needsOrder, suggested,
         dept: id => db.depts.find(d => d.id === id),
-        supplier: id => db.suppliers.find(s => s.id === id),
+        // '__shop': elden alınacak (market, hal…) tedarikçilerin kalemleri tek alışveriş listesinde toplanır
+        SHOP,
+        supplier: id => id === SHOP ? SHOP_SUP : db.suppliers.find(s => s.id === id),
+        isPickup: id => id === SHOP || db.suppliers.some(s => s.id === id && s.mode === 'pickup'),
         item: id => db.items.find(i => i.id === id),
         user: id => db.users.find(u => u.id === id),
         // stok hareketi: sayım (mutlak değer) / giriş / çıkış (fark)
@@ -352,6 +359,8 @@ const Store = (() => {
         // yönetici doğrudan verir (onay gerekmez)
         // via: 'wa' (WhatsApp ile iletildi → tedarikçi cevabı beklenir) | 'mark' (tedarikçi zaten onayladı → yolda) | diğer: iletilecek
         createOrder(supplierId, lines, user, note = '', via = '') {
+            if (this.isPickup(supplierId))
+                supplierId = SHOP;
             const t = now(), confirmed = via === 'mark' || via === 'manual';
             const o = { id: uid(), no: this.nextOrderNo(), supplierId, lines, status: confirmed ? 'verildi' : 'tedarik', createdAt: t, createdBy: user,
                 approvedBy: user, approvedAt: t, note: '', notes: [], adminNote: '', supplierNote: note, log: [{ at: t, user, action: 'olusturdu' }] };
@@ -432,6 +441,8 @@ const Store = (() => {
         // yeni kalemler ona eklenir (tek liste); kimin ne eklediği kalem bazında tutulur.
         requestOrder(supplierId, lines, user, note = '') {
             const t = now();
+            if (this.isPickup(supplierId))
+                supplierId = SHOP;
             const open = this.openOrderFor(supplierId);
             if (note && lines.length === 1 && !lines[0].note)
                 lines = [Object.assign(Object.assign({}, lines[0]), { note })];
@@ -457,8 +468,9 @@ const Store = (() => {
         // eski kayıtlar: aynı tedarikçiye ait birden fazla onay bekleyen siparişi tek listede topla
         mergeOpenOrders() {
             const groups = {};
-            db.orders.filter(o => o.status === 'onay').forEach(o => { var _a; return (groups[_a = o.supplierId || '_'] || (groups[_a] = [])).push(o); });
             let changed = false;
+            db.orders.filter(o => o.status === 'onay' && o.supplierId !== SHOP && this.isPickup(o.supplierId)).forEach(o => { o.supplierId = SHOP; changed = true; });
+            db.orders.filter(o => o.status === 'onay').forEach(o => { var _a; return (groups[_a = o.supplierId || '_'] || (groups[_a] = [])).push(o); });
             Object.values(groups).filter(g => g.length > 1).forEach(g => {
                 g.sort((a, b) => a.createdAt - b.createdAt);
                 const base = g[0];
@@ -479,6 +491,24 @@ const Store = (() => {
             if (changed)
                 commit();
             return changed;
+        },
+        // yönetici kısmi onay: seçilmeyen kalemler ayrı bir listede onay beklemeye devam eder
+        splitOrder(id, itemIds, user) {
+            const o = this.order(id);
+            if (!o || !itemIds.length)
+                return null;
+            const rest = o.lines.filter(l => itemIds.includes(l.itemId));
+            if (!rest.length || rest.length === o.lines.length)
+                return null;
+            o.lines = o.lines.filter(l => !itemIds.includes(l.itemId));
+            const t = now();
+            const n = { id: uid(), no: this.nextOrderNo(), supplierId: o.supplierId, lines: rest, status: 'onay', createdAt: o.createdAt, createdBy: o.createdBy,
+                note: '', notes: [], adminNote: '', supplierNote: '', splitFrom: o.no,
+                log: [{ at: o.createdAt, user: o.createdBy, action: 'onaya_gonderdi' }, { at: t, user, action: 'ayirdi', from: o.no }] };
+            o.log.push({ at: t, user, action: 'ayirdi', to: n.no });
+            db.orders.unshift(n);
+            commit();
+            return n;
         },
         // personel kendi eklediği kalemleri geri çeker; başkalarınınki kalır
         withdrawFromOrder(orderId, user) {

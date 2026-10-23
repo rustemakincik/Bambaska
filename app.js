@@ -1,4 +1,15 @@
 "use strict";
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 /* KafeStok — ekranlar */
 (() => {
     const $app = document.getElementById('app');
@@ -758,7 +769,7 @@
         S.partsOf(o, l).forEach(p => m.set(p.by, (m.get(p.by) || 0) + p.qty));
         return m.size > 1 ? [...m].map(([n, q]) => `${n} ${fmt(q)}`).join(' · ') : [...m.keys()][0];
     };
-    const LOG_TXT = { ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı', kismi_teslim: 'kısmen teslim aldı', iletti: 'tedarikçiye iletti', tedarikci_onay: 'tedarikçi onayını girdi', tedarikci_yok: 'tedarikçi karşılayamadı dedi', atadi: 'alışverişe atadı', yeniden_atadi: 'alışverişi başkasına atadı' };
+    const LOG_TXT = { ayirdi: 'listeyi ikiye ayırdı', ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı', kismi_teslim: 'kısmen teslim aldı', iletti: 'tedarikçiye iletti', tedarikci_onay: 'tedarikçi onayını girdi', tedarikci_yok: 'tedarikçi karşılayamadı dedi', atadi: 'alışverişe atadı', yeniden_atadi: 'alışverişi başkasına atadı' };
     const isShopper = o => o.status === 'alisveris' && o.shopper === (user === null || user === void 0 ? void 0 : user.name);
     const canReceive = o => !readOnly() && (can('teslim') || isShopper(o));
     // tedarikçiyle iletişim: yönetici her zaman; müdür/personel yetkiyle (personel sadece kendi bölümünün kalemleri olan siparişlerde)
@@ -817,7 +828,7 @@
         if (!need.length)
             return seg + `<div class="empty"><div class="e">🎉</div>Sipariş gereken malzeme yok</div>`;
         const groups = {};
-        need.forEach(it => { var _a; return (groups[_a = it.supplierId || '_'] || (groups[_a] = [])).push(it); });
+        need.forEach(it => { var _a; return (groups[_a = grpKey(it)] || (groups[_a] = [])).push(it); });
         const anySel = need.some(it => draftFor(it).on && draftFor(it).qty > 0);
         return seg + `
       ${can('siparis_direkt') ? '' : can('siparis_hazirla') ? `<div class="card small" style="margin-bottom:12px;display:flex;gap:10px;align-items:center"><span style="font-size:20px">📝</span><div>Listeyi kontrol et, gerekirse miktarları değiştir ve <b>yöneticiye onaya gönder</b>.</div></div>`
@@ -828,14 +839,14 @@
             const sel = its.filter(it => draftFor(it).on && draftFor(it).qty > 0).length;
             return `<div class="card" style="padding:0;margin-bottom:14px">
         <div class="sup-head">
-          <div class="avatar" style="background:var(--brand);color:var(--brand-ink)">${esc(initials((sup === null || sup === void 0 ? void 0 : sup.name) || '?'))}</div>
-          <div style="flex:1"><div class="t">${esc((sup === null || sup === void 0 ? void 0 : sup.name) || 'Tedarikçi atanmamış')}</div><div class="s">${esc(sup ? `${sup.contact || ''} ${sup.phone ? '· +' + sup.phone : ''}` : 'Ayarlar’dan malzemeye tedarikçi seç')}</div></div>
+          <div class="avatar" style="background:var(--brand);color:var(--brand-ink)">${sid === S.SHOP ? '🛒' : esc(initials((sup === null || sup === void 0 ? void 0 : sup.name) || '?'))}</div>
+          <div style="flex:1"><div class="t">${esc((sup === null || sup === void 0 ? void 0 : sup.name) || 'Tedarikçi atanmamış')}</div><div class="s">${sid === S.SHOP ? 'Elden alınacaklar · market, hal… tek listede' : esc(sup ? `${sup.contact || ''} ${sup.phone ? '· +' + sup.phone : ''}` : 'Ayarlar’dan malzemeye tedarikçi seç')}</div></div>
         </div>
         ${its.map(it => {
                 const d = draftFor(it);
                 return `<div class="order-line ${d.on ? '' : 'off'}">
             <input type="checkbox" data-act="ol-on" data-id="${it.id}" ${d.on ? 'checked' : ''}>
-            <div class="main"><div class="t" style="font-weight:600">${esc(it.name)}</div>
+            <div class="main"><div class="t" style="font-weight:600">${esc(it.name)}${sid === S.SHOP ? supTag(it) : ''}</div>
               <div class="s small muted">Elde <b style="color:var(--bad)">${fmt(it.qty)}</b> · min ${fmt(it.min)} · hedef ${fmt(it.target)}${pendLabel(it.id)}</div></div>
             <input class="num" inputmode="decimal" data-olq="${it.id}" value="${fmt(d.qty)}"><span class="small muted" style="width:38px">${esc(it.unit)}</span>
             ${can('siparis_direkt') ? '' : `<button class="ln-btn ${ui.lineNotes[it.id] ? 'has' : ''}" data-act="ln-note" data-id="${it.id}" aria-label="Not">💬</button>`}
@@ -843,8 +854,11 @@
           ${!can('siparis_direkt') && (ui.lnOpen[it.id] || ui.lineNotes[it.id]) ? `<div class="ln-in"><input class="note-in" data-lnote="${it.id}" placeholder="${esc(it.name)} için yöneticiye not" value="${esc(ui.lineNotes[it.id] || '')}"></div>` : ''}`;
             }).join('')}
         <div class="sup-foot">
-          ${can('siparis_direkt') ? `<input class="note-in" data-onote="${sid}" placeholder="Tedarikçiye not (WhatsApp ve PDF'te görünür)" value="${esc(((_a = ui.orderNotes) === null || _a === void 0 ? void 0 : _a[sid]) || '')}">` : ''}
-          ${can('siparis_direkt') ? `
+          ${can('siparis_direkt') && sid === S.SHOP ? `<div class="btn-row">
+            <button class="btn sm" data-act="copy-order" data-id="${sid}">Kopyala</button>
+            <button class="btn primary" data-act="shop-order" data-id="${sid}" ${sel ? '' : 'disabled'}>🛒 Alışverişe gönder (${sel})</button></div>`
+                : can('siparis_direkt') ? `<input class="note-in" data-onote="${sid}" placeholder="Tedarikçiye not (WhatsApp ve PDF'te görünür)" value="${esc(((_a = ui.orderNotes) === null || _a === void 0 ? void 0 : _a[sid]) || '')}">` : ''}
+          ${can('siparis_direkt') && sid === S.SHOP ? '' : can('siparis_direkt') ? `
           <div class="btn-row">
             <button class="btn sm" data-act="copy-order" data-id="${sid}">Kopyala</button>
             ${(sup === null || sup === void 0 ? void 0 : sup.phone) ? `<button class="btn wa" data-act="wa-order" data-id="${sid}" ${sel ? '' : 'disabled'}>WhatsApp ile gönder</button>`
@@ -877,20 +891,22 @@
         const sup = S.supplier(o.supplierId);
         const st = o.status === 'verildi' && o.partial ? { name: 'Kısmen geldi · kalan yolda', tone: 'azaliyor', icon: '🚚' }
             : o.status === 'teslim' && o.short ? { name: o.bought ? 'Eksikli alındı' : 'Eksik / iadeli teslim', tone: 'azaliyor', icon: '⚠️' }
-                : o.status === 'tedarik' && ((_a = o.contacts) === null || _a === void 0 ? void 0 : _a.length) ? { name: 'İletildi · cevap bekleniyor', tone: 'azaliyor', icon: '📨' }
-                    : o.status === 'alisveris' && o.partial ? { name: `Kısmen alındı · ${o.shopper}`, tone: 'azaliyor', icon: '🛒' }
-                        : o.status === 'alisveris' ? { name: `Alışverişte · ${o.shopper}`, tone: 'iyi', icon: '🛒' }
-                            : o.status === 'teslim' && o.bought && !o.short ? { name: 'Alındı', tone: 'pasif', icon: '🛍️' }
-                                : OST[o.status] || OST.verildi;
+                : o.status === 'tedarik' && o.supplierId === S.SHOP ? { name: 'Alacak kişi atanacak', tone: 'azaliyor', icon: '🛒' }
+                    : o.status === 'tedarik' && ((_a = o.contacts) === null || _a === void 0 ? void 0 : _a.length) ? { name: 'İletildi · cevap bekleniyor', tone: 'azaliyor', icon: '📨' }
+                        : o.status === 'alisveris' && o.partial ? { name: `Kısmen alındı · ${o.shopper}`, tone: 'azaliyor', icon: '🛒' }
+                            : o.status === 'alisveris' ? { name: `Alışverişte · ${o.shopper}`, tone: 'iyi', icon: '🛒' }
+                                : o.status === 'teslim' && o.bought && !o.short ? { name: 'Alındı', tone: 'pasif', icon: '🛍️' }
+                                    : OST[o.status] || OST.verildi;
         const total = o.lines.length;
         const meta = o.status === 'teslim' ? `${o.bought ? 'Alan' : 'Teslim'}: ${esc(o.receivedBy)} · ${ago(o.receivedAt)}${o.spent ? ` · <b>${fmt(o.spent)} ₺</b>` : ''}`
             : o.status === 'red' ? `Reddeden: ${esc(o.rejectedBy)} · ${ago(o.rejectedAt)}`
-                : o.status === 'tedarik' ? (((_b = o.contacts) === null || _b === void 0 ? void 0 : _b.length) ? `${esc(o.contacts[o.contacts.length - 1].by)} iletti (${o.contacts[o.contacts.length - 1].via === 'tel' ? 'telefon' : 'WhatsApp'}) · ${ago(o.contacts[o.contacts.length - 1].at)}`
-                    : `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}${contactors(o).length ? ` · İletecek: <b>${esc(contactors(o).map(u => u.name).join(', '))}</b>` : ''}`)
-                    : o.status === 'yok' ? `${esc(o.confirmedBy || '')} · ${ago(o.confirmedAt)}`
-                        : o.status === 'alisveris' ? `Alacak: <b>${esc(o.shopper)}</b>${o.shopDue ? ` · ${etaTxt(o.shopDue)}` : ''} · atayan ${esc(o.assignedBy)} · ${ago(o.assignedAt)}`
-                            : o.status === 'verildi' ? (o.confirmedAt ? `Tedarikçi onayı: ${esc(o.confirmedBy)} · ${ago(o.confirmedAt)}${o.eta ? ` · <b>Teslim ${etaTxt(o.eta)}</b>` : ''}` : `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}`)
-                                : `${contributors(o).length > 1 ? 'Ekleyenler' : 'Hazırlayan'}: ${esc(contributors(o).join(', '))} · ${ago(o.createdAt)}`;
+                : o.status === 'tedarik' && o.supplierId === S.SHOP ? `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}${o.splitFrom ? ` · ${esc(o.splitFrom)}'den ayrıldı` : ''}`
+                    : o.status === 'tedarik' ? (((_b = o.contacts) === null || _b === void 0 ? void 0 : _b.length) ? `${esc(o.contacts[o.contacts.length - 1].by)} iletti (${o.contacts[o.contacts.length - 1].via === 'tel' ? 'telefon' : 'WhatsApp'}) · ${ago(o.contacts[o.contacts.length - 1].at)}`
+                        : `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}${contactors(o).length ? ` · İletecek: <b>${esc(contactors(o).map(u => u.name).join(', '))}</b>` : ''}`)
+                        : o.status === 'yok' ? `${esc(o.confirmedBy || '')} · ${ago(o.confirmedAt)}`
+                            : o.status === 'alisveris' ? `Alacak: <b>${esc(o.shopper)}</b>${o.shopDue ? ` · ${etaTxt(o.shopDue)}` : ''} · atayan ${esc(o.assignedBy)} · ${ago(o.assignedAt)}`
+                                : o.status === 'verildi' ? (o.confirmedAt ? `Tedarikçi onayı: ${esc(o.confirmedBy)} · ${ago(o.confirmedAt)}${o.eta ? ` · <b>Teslim ${etaTxt(o.eta)}</b>` : ''}` : `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}`)
+                                    : `${contributors(o).length > 1 ? 'Ekleyenler' : 'Hazırlayan'}: ${esc(contributors(o).join(', '))} · ${ago(o.createdAt)}${o.splitFrom ? ` · <b>${esc(o.splitFrom)}'den kalanlar</b>` : ''}`;
         return `<div class="card order-card" style="padding:0;margin-bottom:12px">
       <div class="sup-head">
         <span style="font-size:22px">${st.icon}</span>
@@ -898,7 +914,7 @@
           <div class="s">${meta}</div></div>
         <span class="badge st-${st.tone}">${st.name}</span>
       </div>
-      ${o.lines.slice(0, 10).map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc((it === null || it === void 0 ? void 0 : it.name) || 'silinmiş malzeme')}${o.status === 'onay' || contributors(o).length > 1 ? lineMeta(o, l) : ''}</div>${lineQtyHTML(o, l, it)}</div>`; }).join('')}
+      ${o.lines.slice(0, 10).map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc((it === null || it === void 0 ? void 0 : it.name) || 'silinmiş malzeme')}${o.supplierId === S.SHOP ? supTag(it) : ''}${o.status === 'onay' || contributors(o).length > 1 ? lineMeta(o, l) : ''}</div>${lineQtyHTML(o, l, it)}</div>`; }).join('')}
       ${total > 10 ? `<div class="order-line small muted">+ ${total - 10} kalem daha</div>` : ''}
       ${noteList(o).map(n => `<div class="o-note"><span>💬 ${esc(n.by)}:</span> ${esc(n.text)}</div>`).join('')}
       ${o.adminNote ? `<div class="o-note admin"><span>🛡️ Yöneticiden personele:</span> ${esc(o.adminNote)}</div>` : ''}
@@ -912,7 +928,7 @@
         ${o.status === 'tedarik' && can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}
         ${o.status === 'tedarik' && canContact(o) ? `<button class="btn ${(sup === null || sup === void 0 ? void 0 : sup.mode) === 'pickup' ? 'primary' : 'sm'}" data-act="assign-shop" data-id="${o.id}">🛒 Personel alsın</button>` : ''}
         ${o.status === 'alisveris' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${canContact(o) ? `<button class="btn ghost sm" data-act="assign-shop" data-id="${o.id}">Başkasına ata</button>` : ''}<button class="btn sm" data-act="share-list" data-id="${o.id}">📋 Listeyi paylaş</button>${canReceive(o) ? `<button class="btn primary" data-act="receive" data-id="${o.id}">${o.partial ? 'Kalanı da aldım' : 'Aldım · stoğa ekle'}</button>` : ''}` : ''}
-        ${o.status === 'tedarik' && canContact(o) ? `${(sup === null || sup === void 0 ? void 0 : sup.phone) ? `<a class="btn sm" href="tel:+${esc(sup.phone)}" data-act="contact-tel" data-id="${o.id}">📞 Ara</a><button class="btn wa sm" data-act="contact-wa" data-id="${o.id}">WhatsApp</button>` : ''}<button class="btn ${(sup === null || sup === void 0 ? void 0 : sup.mode) === 'pickup' ? 'sm' : 'primary'}" data-act="supplier-result" data-id="${o.id}">Sonucu gir</button>` : ''}
+        ${o.status === 'tedarik' && canContact(o) && !(sup === null || sup === void 0 ? void 0 : sup.virtual) ? `${(sup === null || sup === void 0 ? void 0 : sup.phone) ? `<a class="btn sm" href="tel:+${esc(sup.phone)}" data-act="contact-tel" data-id="${o.id}">📞 Ara</a><button class="btn wa sm" data-act="contact-wa" data-id="${o.id}">WhatsApp</button>` : ''}<button class="btn ${(sup === null || sup === void 0 ? void 0 : sup.mode) === 'pickup' ? 'sm' : 'primary'}" data-act="supplier-result" data-id="${o.id}">Sonucu gir</button>` : ''}
         ${o.status === 'onay' && !can('siparis_onay') && isMine(o) ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">Geri çek</button>` : ''}
         ${o.status === 'verildi' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${o.partial && can('teslim') ? `<button class="btn ghost sm" data-act="close-rest" data-id="${o.id}">Kalanı bekleme</button>` : ''}${can('teslim') ? `<button class="btn primary" data-act="receive" data-id="${o.id}">${o.partial ? 'Kalanı teslim al' : 'Teslim aldım'}</button>` : ''}` : ''}
       </div>
@@ -929,8 +945,9 @@
         const draw = sh => {
             sh.querySelector('#rvLines').innerHTML = lines.map((l, i) => {
                 const it = S.item(l.itemId);
-                return `<div class="order-line">
-          <div class="main"><div class="t" style="font-weight:600">${esc((it === null || it === void 0 ? void 0 : it.name) || '?')}</div><div class="small muted">Elde ${fmt(it === null || it === void 0 ? void 0 : it.qty)} · hedef ${fmt(it === null || it === void 0 ? void 0 : it.target)}</div>${lineMeta(o, l)}</div>
+                return `<div class="order-line ${l.skip ? 'off' : ''}">
+          <input type="checkbox" data-rvp="${i}" ${l.skip ? '' : 'checked'} aria-label="Bu sefer onayla">
+          <div class="main"><div class="t" style="font-weight:600">${esc((it === null || it === void 0 ? void 0 : it.name) || '?')}${o.supplierId === S.SHOP ? supTag(it) : ''}</div><div class="small muted">Elde ${fmt(it === null || it === void 0 ? void 0 : it.qty)} · hedef ${fmt(it === null || it === void 0 ? void 0 : it.target)}</div>${lineMeta(o, l)}</div>
           <div class="stepper"><button data-rv="${i}" data-d="-1">−</button><input data-rvq="${i}" inputmode="decimal" value="${fmt(l.qty)}"><button data-rv="${i}" data-d="1">+</button></div>
           <span class="small muted" style="width:34px">${esc((it === null || it === void 0 ? void 0 : it.unit) || '')}</span>
           <button class="x-btn" data-rvx="${i}" aria-label="Çıkar">✕</button>
@@ -942,7 +959,10 @@
             sh.querySelector('#rvAdd').innerHTML = `<option value="">+ Malzeme ekle…</option>`
                 + (mine.length ? `<optgroup label="${esc((sup === null || sup === void 0 ? void 0 : sup.name) || 'Bu tedarikçi')}">${mine.map(i => `<option value="${i.id}">${esc(i.name)} (elde ${fmt(i.qty)} ${esc(i.unit)})</option>`).join('')}</optgroup>` : '')
                 + (other.length ? `<optgroup label="Diğer malzemeler">${other.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join('')}</optgroup>` : '');
-            sh.querySelector('#rvCount').textContent = `${lines.length} kalem`;
+            const nSel = lines.filter(l => !l.skip).length;
+            sh.querySelector('#rvCount').textContent = nSel < lines.length ? `${lines.length} kalem · ${nSel} seçili` : `${lines.length} kalem`;
+            sh.querySelector('#rvHint').innerHTML = nSel < lines.length ? `☑️ <b>${nSel}</b> kalem şimdi onaylanacak · işaretsiz <b>${lines.length - nSel}</b> kalem ayrı bir listede onay beklemeye devam eder.` : 'İşaretini kaldırdığın kalemler ayrı listede bekler · ✕ ile çıkardıkların silinir.';
+            sh.querySelectorAll('[data-rvp]').forEach(c => c.onchange = () => { sh.querySelectorAll('[data-rvq]').forEach(inp => { lines[+inp.dataset.rvq].qty = num(inp.value); }); lines[+c.dataset.rvp].skip = !c.checked; draw(sh); });
             sh.querySelectorAll('[data-rv]').forEach(b => b.onclick = () => {
                 const i = +b.dataset.rv, it = S.item(lines[i].itemId);
                 lines[i].qty = Math.max(0, lines[i].qty + stepOf(it) * b.dataset.d);
@@ -956,16 +976,17 @@
       <h3>${esc((sup === null || sup === void 0 ? void 0 : sup.name) || 'Tedarikçi')}</h3>
       <div class="sub">${contributors(o).length > 1 ? 'Ekleyenler' : 'Hazırlayan'} <b>${esc(contributors(o).join(', '))}</b> · ${ago(o.createdAt)} · <span id="rvCount"></span></div>
       ${noteList(o).map(n => `<div class="o-note" style="border-radius:12px;margin-bottom:8px"><span>💬 ${esc(n.by)}:</span> ${esc(n.text)}</div>`).join('')}
+      <div class="small muted rv-hint" id="rvHint"></div>
       <div class="list" id="rvLines"></div>
       <select class="add-sel" id="rvAdd"></select>
-      <label class="field" style="margin-top:14px"><span>📦 Tedarikçiye not <em class="fhint">PDF ve WhatsApp'ta görünür</em></span><textarea id="rvSup" rows="2" placeholder="örn. Cuma öğlene kadar teslim edin">${esc(o.supplierNote || '')}</textarea></label>
+      ${(sup === null || sup === void 0 ? void 0 : sup.virtual) ? `<textarea id="rvSup" hidden>${esc(o.supplierNote || '')}</textarea><div style="height:10px"></div>` : `<label class="field" style="margin-top:14px"><span>📦 Tedarikçiye not <em class="fhint">PDF ve WhatsApp'ta görünür</em></span><textarea id="rvSup" rows="2" placeholder="örn. Cuma öğlene kadar teslim edin">${esc(o.supplierNote || '')}</textarea></label>`}
       <label class="field"><span>🛡️ Personele not <em class="fhint">sadece programda</em></span><textarea id="rvNote" rows="2" placeholder="örn. Karpuz nane yerine elma aldık · red sebebi">${esc(o.adminNote || '')}</textarea></label>
       <div class="btn-row">
         <button class="btn danger" id="rvRej">Reddet</button>
-        <button class="btn dark" id="rvOk">${(sup === null || sup === void 0 ? void 0 : sup.mode) === 'pickup' ? 'Onayla' : 'Onayla · müdür iletsin'}</button>
+        <button class="btn dark" id="rvOk">${(sup === null || sup === void 0 ? void 0 : sup.mode) === 'pickup' ? 'Onayla · kişiyi sonra ata' : 'Onayla · müdür iletsin'}</button>
       </div>
       ${(sup === null || sup === void 0 ? void 0 : sup.phone) ? `<button class="btn wa block" style="margin-top:8px" id="rvWa">Onayla ve tedarikçiye ben ileteyim (WhatsApp)</button>` : ''}
-      <button class="btn block" style="margin-top:8px" id="rvShop">🛒 Onayla ve bir personele aldır</button>
+      <button class="btn ${o.supplierId === S.SHOP ? 'primary' : ''} block" style="margin-top:8px" id="rvShop">🛒 Onayla ve alacak kişiyi seç</button>
       <button class="btn ghost block" style="margin-top:6px" id="rvPdf">📄 PDF önizle</button>
       <div class="small muted" style="margin-top:10px">${(o.log || []).map(l => `${esc(l.user)} ${LOG_TXT[l.action] || l.action} · ${ago(l.at)}`).join('<br>')}</div>`, sh => {
             var _a;
@@ -981,12 +1002,31 @@
             const save = () => {
                 sh.querySelectorAll('[data-rvq]').forEach(inp => { lines[+inp.dataset.rvq].qty = num(inp.value); });
                 lines = lines.filter(l => l.qty > 0);
-                S.updateOrder(oid, { lines, adminNote: sh.querySelector('#rvNote').value.trim(), supplierNote: sh.querySelector('#rvSup').value.trim() }, user.name);
+                S.updateOrder(oid, { lines: lines.map((_a) => {
+                        var { skip } = _a, l = __rest(_a, ["skip"]);
+                        return l;
+                    }), adminNote: sh.querySelector('#rvNote').value.trim(), supplierNote: sh.querySelector('#rvSup').value.trim() }, user.name);
                 return lines.length;
             };
+            // seçilmeyen kalemler ayrı listeye; seçilenler onaylanır
+            const split = () => {
+                const skip = lines.filter(l => l.skip && l.qty > 0).map(l => l.itemId);
+                if (skip.length && skip.length >= lines.filter(l => l.qty > 0).length) {
+                    toast('Onaylanacak en az bir kalem işaretle');
+                    return false;
+                }
+                if (!save()) {
+                    toast('Listede kalem yok');
+                    return false;
+                }
+                const n = S.splitOrder(oid, skip, user.name);
+                if (n)
+                    setTimeout(() => toast(`İşaretsiz ${skip.length} kalem ${n.no} listesinde onay bekliyor`), 2600);
+                return true;
+            };
             const approve = wa => {
-                if (!save())
-                    return toast('Listede kalem yok');
+                if (!split())
+                    return;
                 S.approveOrder(oid, user.name);
                 if (wa) {
                     S.logContact(oid, user.name, 'wa');
@@ -998,8 +1038,8 @@
                 toast(wa ? `${o.no} onaylandı ve iletildi · tedarikçinin cevabını gir` : `${o.no} onaylandı · tedarikçiye iletilecek`);
             };
             sh.querySelector('#rvOk').onclick = () => approve(false);
-            sh.querySelector('#rvShop').onclick = () => { if (!save())
-                return toast('Listede kalem yok'); S.approveOrder(oid, user.name); ui.sipTab = 'yolda'; assignSheet(oid); };
+            sh.querySelector('#rvShop').onclick = () => { if (!split())
+                return; S.approveOrder(oid, user.name); ui.sipTab = 'yolda'; assignSheet(oid); };
             (_a = sh.querySelector('#rvWa')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => approve(true));
             sh.querySelector('#rvRej').onclick = () => {
                 const note = sh.querySelector('#rvNote').value.trim();
@@ -1013,8 +1053,11 @@
             sh.querySelector('#rvPdf').onclick = () => { save(); openDoc({ type: 'order', ids: [oid] }); };
         });
     }
+    // elden alınan (market, hal…) tedarikçilerin malzemeleri tek "Alışveriş listesi" grubunda
+    const grpKey = it => S.isPickup(it.supplierId) ? S.SHOP : (it.supplierId || '_');
+    const supTag = it => { const s = S.supplier(it === null || it === void 0 ? void 0 : it.supplierId); return s ? `<span class="sup-tag">${esc(s.name)}</span>` : ''; };
     function draftLines(sid) {
-        return myNeeds().filter(i => (i.supplierId || '_') === sid)
+        return myNeeds().filter(i => grpKey(i) === sid)
             .map(it => ({ it, d: draftFor(it) })).filter(x => x.d.on && x.d.qty > 0);
     }
     const textLines = (lines) => lines.map(x => `• ${x.name}: ${fmt(x.qty)} ${x.unit}`).join('\n');
@@ -1039,7 +1082,7 @@
             toast(S.lastMerged ? `${o.no} listesine eklendi (onay bekliyor)` : `${o.no} yöneticiye onaya gönderildi`);
         }
         else {
-            o = S.createOrder(sid === '_' ? null : sid, mk(), user.name, note, via);
+            o = S.createOrder(sid === '_' ? null : sid, mk(), user.name, note, via === 'shop' ? '' : via);
             if (via === 'wa')
                 window.open(`https://wa.me/${S.supplier(sid).phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank');
             toast(o.status === 'verildi' ? `${o.no} "Yolda" sekmesine eklendi` : `${o.no} iletildi · tedarikçinin cevabını "Tedarikçi" sekmesinden gir`);
@@ -1048,6 +1091,10 @@
         if (ui.orderNotes)
             delete ui.orderNotes[sid];
         render();
+        if (via === 'shop' && o) {
+            ui.sipTab = 'tedarik';
+            setTimeout(() => assignSheet(o.id), 50);
+        }
     }
     // ---------- PDF / yazdırılabilir sipariş formu
     let docSpec = null;
@@ -1939,14 +1986,15 @@
           <div class="stepper"><button data-o="-1">−</button><input id="ordQ" inputmode="decimal" value="${fmt(oq)}"><button data-o="1">+</button></div></div>
         <input class="note-in" id="ordNote" placeholder="${can('siparis_direkt') ? 'Tedarikçiye not (WhatsApp ve PDF\'te görünür)' : 'Bu malzeme için yöneticiye not'}">
         ${can('siparis_direkt')
-                ? `<div class="btn-row">${sup.phone ? `<button class="btn wa" id="ordWa">WhatsApp ile gönder</button>` : ''}<button class="btn dark" id="ordMark">Sipariş verildi</button></div>`
+                ? sup.mode === 'pickup' ? `<button class="btn primary block" id="ordShop">🛒 Alışverişe gönder</button>`
+                    : `<div class="btn-row">${sup.phone ? `<button class="btn wa" id="ordWa">WhatsApp ile gönder</button>` : ''}<button class="btn dark" id="ordMark">Sipariş verildi</button></div>`
                 : `<button class="btn primary block" id="ordReq">Onaya gönder</button>`}
       </div>` : `<div class="card small muted">Sipariş hazırlama yetkin yok.</div>`}
 
       <h2 class="section">Geçmiş</h2>
       <div class="list">${hist.map(m => `<div class="row"><div class="main"><div class="t" style="font-weight:500">${esc(m.user)} ${MV_LABEL[m.type]}</div><div class="s">${ago(m.at)}${m.note ? ' · ' + esc(m.note) : ''}</div></div><div class="qty small"><span class="muted">${fmt(m.before)} →</span> <b>${fmt(m.after)}</b></div></div>`).join('') || '<div class="empty small">Kayıt yok</div>'}</div>
       ${can('malzeme') ? `<button class="btn ghost block" style="margin-top:10px" id="editItem">Malzemeyi düzenle</button>` : ''}`, sh => {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d, _e, _f;
             const inp = sh.querySelector('#bigQ'), oin = sh.querySelector('#ordQ');
             let touched = false;
             const redraw = () => { const d = oin && touched ? Math.max(0, num(oin.value)) : 0; sh.querySelector('#bigBar').innerHTML = bar(it, true, d); sh.querySelector('#legend').innerHTML = legend(d); };
@@ -1975,22 +2023,26 @@
                     toast(S.lastMerged ? `${o.no} listesine eklendi` : `${o.no} onaya gönderildi`);
                 }
                 else {
-                    o = S.createOrder(it.supplierId, lines, user.name, note, via);
+                    o = S.createOrder(it.supplierId, lines, user.name, note, via === 'shop' ? '' : via);
                     if (via === 'wa')
                         window.open(`https://wa.me/${sup.phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank');
-                    toast(o.status === 'verildi' ? `${o.no} yolda` : `${o.no} iletildi · tedarikçi cevabı bekleniyor`);
+                    if (via !== 'shop')
+                        toast(o.status === 'verildi' ? `${o.no} yolda` : `${o.no} iletildi · tedarikçi cevabı bekleniyor`);
                 }
                 delete ui.orderDraft[id];
                 render();
+                if (via === 'shop')
+                    return assignSheet(o.id, () => openItem(id));
                 openItem(id);
             };
             (_b = sh.querySelector('#ordReq')) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => place('req'));
             (_c = sh.querySelector('#ordWa')) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => place('wa'));
             (_d = sh.querySelector('#ordMark')) === null || _d === void 0 ? void 0 : _d.addEventListener('click', () => place('mark'));
+            (_e = sh.querySelector('#ordShop')) === null || _e === void 0 ? void 0 : _e.addEventListener('click', () => place('shop'));
             sh.querySelectorAll('[data-recv]').forEach(b => b.onclick = () => receiveSheet(b.dataset.recv, () => openItem(id)));
             sh.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => reviewOrder(b.dataset.rev));
             sh.querySelectorAll('[data-sres]').forEach(b => b.onclick = () => supplierSheet(b.dataset.sres, () => openItem(id)));
-            (_e = sh.querySelector('#editItem')) === null || _e === void 0 ? void 0 : _e.addEventListener('click', () => editItem(id));
+            (_f = sh.querySelector('#editItem')) === null || _f === void 0 ? void 0 : _f.addEventListener('click', () => editItem(id));
             redraw();
         });
     }
@@ -2167,8 +2219,10 @@
     }
     function shopListText(o) {
         const sup = S.supplier(o.supplierId);
-        return `🛒 ${S.get().cafe.name} alışveriş listesi (${o.no})${sup ? ' · ' + sup.name : ''}\n` +
-            o.lines.filter(l => S.lineLeft(l) > 0).map(l => { const it = S.item(l.itemId); return `☐ ${(it === null || it === void 0 ? void 0 : it.name) || '?'}: ${fmt(S.lineLeft(l))} ${(it === null || it === void 0 ? void 0 : it.unit) || ''}`; }).join('\n') +
+        const ls = o.lines.filter(l => S.lineLeft(l) > 0), by = {};
+        ls.forEach(l => { var _a; const it = S.item(l.itemId), k = o.supplierId === S.SHOP ? (((_a = S.supplier(it === null || it === void 0 ? void 0 : it.supplierId)) === null || _a === void 0 ? void 0 : _a.name) || 'Diğer') : ''; (by[k] || (by[k] = [])).push(`☐ ${(it === null || it === void 0 ? void 0 : it.name) || '?'}: ${fmt(S.lineLeft(l))} ${(it === null || it === void 0 ? void 0 : it.unit) || ''}`); });
+        return `🛒 ${S.get().cafe.name} alışveriş listesi (${o.no})${sup && !sup.virtual ? ' · ' + sup.name : ''}\n` +
+            Object.entries(by).map(([k, v]) => (k ? `\n📍 ${k}\n` : '') + v.join('\n')).join('\n') +
             (o.shopNote ? `\n\nNot: ${o.shopNote}` : '');
     }
     // tedarikçiden gelen cevap: ne kadar verebiliyor, ne zaman getirecek
@@ -2468,6 +2522,7 @@
             'copy-order': () => { var _a; (_a = navigator.clipboard) === null || _a === void 0 ? void 0 : _a.writeText(orderText(id)).then(() => toast('Sipariş metni kopyalandı'), () => toast('Kopyalanamadı')); },
             'wa-order': () => placeOrder(id, 'wa'),
             'mark-order': () => placeOrder(id, 'manual'),
+            'shop-order': () => placeOrder(id, 'shop'),
             'request-order': () => placeOrder(id, 'request'),
             'ln-note': () => { ui.lnOpen[id] = !ui.lnOpen[id] || !!ui.lineNotes[id]; render(); setTimeout(() => { var _a; return (_a = document.querySelector(`[data-lnote="${id}"]`)) === null || _a === void 0 ? void 0 : _a.focus(); }, 30); },
             'review-order': () => reviewOrder(id),

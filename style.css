@@ -660,3 +660,6 @@ a.btn { text-decoration: none; }
 .apk-steps > div:not(.qr-big) { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; margin-top: 10px; }
 .apk-steps > div:not(.qr-big) > b { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
 .nfg .apk-steps > div:not(.qr-big) > b { margin-right: 10px; }
+.sup-tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 11.5px; font-weight: 600; vertical-align: 1px; }
+.rv-hint { margin: 4px 2px 8px; }
+.order-line > input[data-rvp] { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
