@@ -1,0 +1,24 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.bambaska.kafe'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.bambaska.kafe'
+        minSdk 24
+        targetSdk 34
+        versionCode Integer.parseInt(System.getenv('VERSION_CODE') ?: '1')
+        versionName '1.' + (System.getenv('VERSION_CODE') ?: '0')
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('KS_FILE') ?: '../release.jks')
+            storePassword System.getenv('KS_PASS') ?: 'bambaska-kafe'
+            keyAlias 'bambaska'
+            keyPassword System.getenv('KS_PASS') ?: 'bambaska-kafe'
+        }
+    }
+    buildTypes {
+        release { minifyEnabled false; signingConfig signingConfigs.release }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
