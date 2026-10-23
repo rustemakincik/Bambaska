@@ -146,10 +146,25 @@ const Store = (() => {
   // ---- sipariş kalemi yardımcıları
   const partsOf = (o, l) => l.parts && l.parts.length ? l.parts : [{ by: o.createdBy, qty: l.qty, at: o.createdAt }];
   const notesOf = o => o.notes ? [...o.notes] : (o.note ? [{ by: o.createdBy, text: o.note, at: o.createdAt }] : []);
+  // not, kalemi ekleyen kişinin o kalem için yazdığı iç nottur (tedarikçiye gitmez)
   function addLine(o, l, user, t) {
+    const part = { by: user, qty: l.qty, at: t };
+    if (l.note) part.note = l.note;
     const ex = o.lines.find(x => x.itemId === l.itemId);
-    if (ex) { ex.parts = [...partsOf(o, ex), { by: user, qty: l.qty, at: t }]; ex.qty = Math.round((ex.qty + l.qty) * 100) / 100; }
-    else o.lines.push({ itemId: l.itemId, qty: l.qty, parts: [{ by: user, qty: l.qty, at: t }] });
+    if (ex) { ex.parts = [...partsOf(o, ex), part]; ex.qty = Math.round((ex.qty + l.qty) * 100) / 100; }
+    else o.lines.push({ itemId: l.itemId, qty: l.qty, parts: [part] });
+  }
+  // eski sipariş geneli notları, aynı anda eklenen kaleme taşı
+  function attachNotes(o) {
+    const rest = [];
+    notesOf(o).forEach(n => {
+      const l = o.lines.find(l => partsOf(o, l).some(p => p.by === n.by && p.at === n.at && !p.note));
+      if (l) { l.parts = partsOf(o, l).map(p => p.by === n.by && p.at === n.at && !p.note ? { ...p, note: n.text } : p); }
+      else rest.push(n);
+    });
+    const changed = rest.length !== notesOf(o).length || (o.note && !o.notes);
+    if (changed) { o.notes = rest; o.note = ''; }
+    return changed;
   }
 
   // ---- yardımcılar
@@ -230,7 +245,7 @@ const Store = (() => {
     // yönetici doğrudan verir (onay gerekmez)
     createOrder(supplierId, lines, user, note = '') {
       const o = { id: uid(), no: this.nextOrderNo(), supplierId, lines, status: 'verildi', createdAt: now(), createdBy: user,
-        approvedBy: user, approvedAt: now(), note, adminNote: '', log: [{ at: now(), user, action: 'olusturdu', note }] };
+        approvedBy: user, approvedAt: now(), note: '', notes: [], adminNote: '', supplierNote: note, log: [{ at: now(), user, action: 'olusturdu' }] };
       db.orders.unshift(o); commit(); return o;
     },
     // personel yöneticiye onaya gönderir
@@ -239,14 +254,14 @@ const Store = (() => {
     requestOrder(supplierId, lines, user, note = '') {
       const t = now();
       const open = this.openOrderFor(supplierId);
+      if (note && lines.length === 1 && !lines[0].note) lines = [{ ...lines[0], note }];
       if (open) {
         lines.forEach(l => addLine(open, l, user, t));
-        if (note) (open.notes = notesOf(open)).push({ by: user, text: note, at: t });
         (open.log ||= []).push({ at: t, user, action: 'ekledi', note });
         this.lastMerged = true; commit(); return open;
       }
       const o = { id: uid(), no: this.nextOrderNo(), supplierId: supplierId || null, lines: [], status: 'onay', createdAt: t, createdBy: user,
-        note: '', notes: note ? [{ by: user, text: note, at: t }] : [], adminNote: '', log: [{ at: t, user, action: 'onaya_gonderdi', note }] };
+        note: '', notes: [], adminNote: '', supplierNote: '', log: [{ at: t, user, action: 'onaya_gonderdi', note }] };
       lines.forEach(l => addLine(o, l, user, t));
       db.orders.unshift(o); this.lastMerged = false; commit(); return o;
     },
@@ -263,8 +278,10 @@ const Store = (() => {
         g.sort((a, b) => a.createdAt - b.createdAt);
         const base = g[0];
         base.notes = notesOf(base);
+        attachNotes(base);
         g.slice(1).forEach(o => {
-          o.lines.forEach(l => partsOf(o, l).forEach(pt => addLine(base, { itemId: l.itemId, qty: pt.qty }, pt.by, pt.at || o.createdAt)));
+          attachNotes(o);
+          o.lines.forEach(l => partsOf(o, l).forEach(pt => addLine(base, { itemId: l.itemId, qty: pt.qty, note: pt.note }, pt.by, pt.at || o.createdAt)));
           base.notes.push(...notesOf(o));
           (base.log ||= []).push(...(o.log || []).map(x => x.action === 'onaya_gonderdi' ? { ...x, action: 'ekledi' } : x));
           db.orders = db.orders.filter(x => x.id !== o.id);
@@ -272,6 +289,7 @@ const Store = (() => {
         base.log.sort((a, b) => a.at - b.at);
         changed = true;
       });
+      db.orders.filter(o => o.status === 'onay').forEach(o => { if (attachNotes(o)) changed = true; });
       if (changed) commit();
       return changed;
     },

@@ -5,7 +5,7 @@
   const ui = {
     stokDept: 'all', stokQ: '', onlyCrit: false,
     sayimDept: null, sayimDraft: {},
-    sipTab: 'hazir', orderDraft: {}, orderNotes: {},
+    sipTab: 'hazir', orderDraft: {}, orderNotes: {}, lineNotes: {}, lnOpen: {},
   };
   let user = null;
 
@@ -457,6 +457,11 @@
   const contributors = o => [...new Set(o.lines.flatMap(l => lineBy(o, l)).concat(o.createdBy))];
   const noteList = o => S.notesOf(o);
   const isMine = o => contributors(o).includes(user.name);
+  const lineMeta = (o, l) => {
+    const notes = S.partsOf(o, l).filter(p => p.note);
+    return `<div class="by">👤 ${esc(byTxt(o, l))}</div>${notes.map(p => `<div class="ln-note">💬 ${esc(p.note)}${lineBy(o, l).length > 1 ? ` <i>— ${esc(p.by)}</i>` : ''}</div>`).join('')}`;
+  };
+  const supNoteHTML = o => o.supplierNote ? `<div class="o-note sup"><span>📦 Tedarikçiye:</span> ${esc(o.supplierNote)}</div>` : '';
   const byTxt = (o, l) => {
     const m = new Map(); S.partsOf(o, l).forEach(p => m.set(p.by, (m.get(p.by) || 0) + p.qty));
     return m.size > 1 ? [...m].map(([n, q]) => `${n} ${fmt(q)}`).join(' · ') : [...m.keys()][0];
@@ -514,10 +519,12 @@
             <div class="main"><div class="t" style="font-weight:600">${esc(it.name)}</div>
               <div class="s small muted">Elde <b style="color:var(--bad)">${fmt(it.qty)}</b> · min ${fmt(it.min)} · hedef ${fmt(it.target)}${pendLabel(it.id)}</div></div>
             <input class="num" inputmode="decimal" data-olq="${it.id}" value="${fmt(d.qty)}"><span class="small muted" style="width:38px">${esc(it.unit)}</span>
-          </div>`;
+            ${can('siparis_direkt') ? '' : `<button class="ln-btn ${ui.lineNotes[it.id] ? 'has' : ''}" data-act="ln-note" data-id="${it.id}" aria-label="Not">💬</button>`}
+          </div>
+          ${!can('siparis_direkt') && (ui.lnOpen[it.id] || ui.lineNotes[it.id]) ? `<div class="ln-in"><input class="note-in" data-lnote="${it.id}" placeholder="${esc(it.name)} için yöneticiye not" value="${esc(ui.lineNotes[it.id] || '')}"></div>` : ''}`;
         }).join('')}
         <div class="sup-foot">
-          <input class="note-in" data-onote="${sid}" placeholder="${can('siparis_direkt') ? 'Not (isteğe bağlı)' : 'Yöneticiye not (isteğe bağlı)'}" value="${esc(ui.orderNotes?.[sid] || '')}">
+          ${can('siparis_direkt') ? `<input class="note-in" data-onote="${sid}" placeholder="Tedarikçiye not (WhatsApp ve PDF'te görünür)" value="${esc(ui.orderNotes?.[sid] || '')}">` : ''}
           ${can('siparis_direkt') ? `
           <div class="btn-row">
             <button class="btn sm" data-act="copy-order" data-id="${sid}">Kopyala</button>
@@ -547,10 +554,11 @@
           <div class="s">${meta}</div></div>
         <span class="badge st-${st.tone}">${st.name}</span>
       </div>
-      ${o.lines.slice(0, 10).map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc(it?.name || 'silinmiş malzeme')}${o.status === 'onay' || contributors(o).length > 1 ? `<div class="by">👤 ${esc(byTxt(o, l))}</div>` : ''}</div><b>${fmt(l.received ?? l.qty)} ${esc(it?.unit || '')}</b></div>`; }).join('')}
+      ${o.lines.slice(0, 10).map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc(it?.name || 'silinmiş malzeme')}${o.status === 'onay' || contributors(o).length > 1 ? lineMeta(o, l) : ''}</div><b>${fmt(l.received ?? l.qty)} ${esc(it?.unit || '')}</b></div>`; }).join('')}
       ${total > 10 ? `<div class="order-line small muted">+ ${total - 10} kalem daha</div>` : ''}
       ${noteList(o).map(n => `<div class="o-note"><span>💬 ${esc(n.by)}:</span> ${esc(n.text)}</div>`).join('')}
-      ${o.adminNote ? `<div class="o-note admin"><span>🛡️ Yönetici:</span> ${esc(o.adminNote)}</div>` : ''}
+      ${o.adminNote ? `<div class="o-note admin"><span>🛡️ Yöneticiden personele:</span> ${esc(o.adminNote)}</div>` : ''}
+      ${supNoteHTML(o)}
       <div class="sup-foot btn-row">
         <button class="btn sm" data-act="pdf-order" data-id="${o.id}">📄 PDF</button>
         ${o.status === 'onay' && can('siparis_onay') ? `<button class="btn primary" data-act="review-order" data-id="${o.id}">İncele ve onayla</button>` : ''}
@@ -569,7 +577,7 @@
       sh.querySelector('#rvLines').innerHTML = lines.map((l, i) => {
         const it = S.item(l.itemId);
         return `<div class="order-line">
-          <div class="main"><div class="t" style="font-weight:600">${esc(it?.name || '?')}</div><div class="small muted">Elde ${fmt(it?.qty)} · hedef ${fmt(it?.target)}</div><div class="by">👤 ${esc(byTxt(o, l))}</div></div>
+          <div class="main"><div class="t" style="font-weight:600">${esc(it?.name || '?')}</div><div class="small muted">Elde ${fmt(it?.qty)} · hedef ${fmt(it?.target)}</div>${lineMeta(o, l)}</div>
           <div class="stepper"><button data-rv="${i}" data-d="-1">−</button><input data-rvq="${i}" inputmode="decimal" value="${fmt(l.qty)}"><button data-rv="${i}" data-d="1">+</button></div>
           <span class="small muted" style="width:34px">${esc(it?.unit || '')}</span>
           <button class="x-btn" data-rvx="${i}" aria-label="Çıkar">✕</button>
@@ -596,7 +604,8 @@
       ${noteList(o).map(n => `<div class="o-note" style="border-radius:12px;margin-bottom:8px"><span>💬 ${esc(n.by)}:</span> ${esc(n.text)}</div>`).join('')}
       <div class="list" id="rvLines"></div>
       <select class="add-sel" id="rvAdd"></select>
-      <label class="field" style="margin-top:12px"><span>Yönetici notu</span><textarea id="rvNote" rows="2" placeholder="örn. Karpuz nane yerine elma al, cuma teslim olsun">${esc(o.adminNote || '')}</textarea></label>
+      <label class="field" style="margin-top:14px"><span>📦 Tedarikçiye not <em class="fhint">PDF ve WhatsApp'ta görünür</em></span><textarea id="rvSup" rows="2" placeholder="örn. Cuma öğlene kadar teslim edin">${esc(o.supplierNote || '')}</textarea></label>
+      <label class="field"><span>🛡️ Personele not <em class="fhint">sadece programda</em></span><textarea id="rvNote" rows="2" placeholder="örn. Karpuz nane yerine elma aldık · red sebebi">${esc(o.adminNote || '')}</textarea></label>
       <div class="btn-row">
         <button class="btn danger" id="rvRej">Reddet</button>
         <button class="btn dark" id="rvOk">Onayla</button>
@@ -614,7 +623,7 @@
         const save = () => {
           sh.querySelectorAll('[data-rvq]').forEach(inp => { lines[+inp.dataset.rvq].qty = num(inp.value); });
           lines = lines.filter(l => l.qty > 0);
-          S.updateOrder(oid, { lines, adminNote: sh.querySelector('#rvNote').value.trim() }, user.name);
+          S.updateOrder(oid, { lines, adminNote: sh.querySelector('#rvNote').value.trim(), supplierNote: sh.querySelector('#rvSup').value.trim() }, user.name);
           return lines.length;
         };
         const approve = wa => {
@@ -627,7 +636,7 @@
         sh.querySelector('#rvWa')?.addEventListener('click', () => approve(true));
         sh.querySelector('#rvRej').onclick = () => {
           const note = sh.querySelector('#rvNote').value.trim();
-          if (!note && !confirm('Not yazmadan reddedilsin mi? (Sorumlu nedenini göremez)')) return;
+          if (!note && !confirm('Personele not yazmadan reddedilsin mi? (Neden reddedildiğini göremez)')) return;
           S.rejectOrder(oid, user.name, note); closeSheet(); render(); toast(`${o.no} reddedildi`);
         };
         sh.querySelector('#rvPdf').onclick = () => { save(); openDoc({ type: 'order', ids: [oid] }); };
@@ -640,26 +649,27 @@
   }
   const textLines = (lines) => lines.map(x => `• ${x.name}: ${fmt(x.qty)} ${x.unit}`).join('\n');
   function textForOrder(o) {
-    return `Merhaba, ${S.get().cafe.name} için sipariş (${o.no}):\n` + textLines(o.lines.map(l => { const it = S.item(l.itemId); return { name: it?.name, qty: l.qty, unit: it?.unit }; })) + `\nTeşekkürler.`;
+    return `Merhaba, ${S.get().cafe.name} için sipariş (${o.no}):\n` + textLines(o.lines.map(l => { const it = S.item(l.itemId); return { name: it?.name, qty: l.qty, unit: it?.unit }; })) + (o.supplierNote ? `\n\nNot: ${o.supplierNote}` : '') + `\nTeşekkürler.`;
   }
   function orderText(sid) {
-    return `Merhaba, ${S.get().cafe.name} için sipariş:\n` + textLines(draftLines(sid).map(x => ({ name: x.it.name, qty: x.d.qty, unit: x.it.unit }))) + `\nTeşekkürler.`;
+    const n = ui.orderNotes?.[sid];
+    return `Merhaba, ${S.get().cafe.name} için sipariş:\n` + textLines(draftLines(sid).map(x => ({ name: x.it.name, qty: x.d.qty, unit: x.it.unit }))) + (n ? `\n\nNot: ${n}` : '') + `\nTeşekkürler.`;
   }
   function placeOrder(sid, via) {
     const lines = draftLines(sid);
     if (!lines.length) return toast('Seçili malzeme yok');
     const note = ui.orderNotes?.[sid] || '';
-    const mk = l => lines.map(x => ({ itemId: x.it.id, qty: x.d.qty }));
+    const mk = () => lines.map(x => ({ itemId: x.it.id, qty: x.d.qty, ...(via === 'request' && ui.lineNotes[x.it.id] ? { note: ui.lineNotes[x.it.id] } : {}) }));
     let o;
     if (via === 'request') {
-      o = S.requestOrder(sid === '_' ? null : sid, mk(), user.name, note);
+      o = S.requestOrder(sid === '_' ? null : sid, mk(), user.name);
       toast(S.lastMerged ? `${o.no} listesine eklendi (onay bekliyor)` : `${o.no} yöneticiye onaya gönderildi`);
     } else {
       o = S.createOrder(sid === '_' ? null : sid, mk(), user.name, note);
       if (via === 'wa') window.open(`https://wa.me/${S.supplier(sid).phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank');
       toast(`${o.no} "Yolda" sekmesine eklendi`);
     }
-    lines.forEach(x => delete ui.orderDraft[x.it.id]);
+    lines.forEach(x => { delete ui.orderDraft[x.it.id]; delete ui.lineNotes[x.it.id]; delete ui.lnOpen[x.it.id]; });
     if (ui.orderNotes) delete ui.orderNotes[sid];
     render();
   }
@@ -674,7 +684,7 @@
     if (docSpec.type === 'order') {
       docs = docSpec.ids.map(id => S.order(id)).filter(Boolean).map(o => ({
         no: o.no, status: OST[o.status]?.name, sup: S.supplier(o.supplierId), date: o.createdAt,
-        lines: o.lines.map(l => ({ it: S.item(l.itemId), qty: l.qty })), notes: noteList(o).map(n => n.text), adminNote: o.adminNote,
+        lines: o.lines.map(l => ({ it: S.item(l.itemId), qty: l.qty })), notes: o.supplierNote ? [o.supplierNote] : [],
         approved: o.approvedBy ? [o.approvedBy, o.approvedAt] : null,
       }));
     } else { // hazırlanan (henüz gönderilmemiş) liste
@@ -711,9 +721,8 @@
             <tbody>${d.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.it?.name || '?')}</td><td>${esc(S.dept(l.it?.deptId)?.name || '')}</td><td class="r"><b>${fmt(l.qty)}</b></td><td>${esc(l.it?.unit || '')}</td><td class="c"><span class="box"></span></td></tr>`).join('')}</tbody>
             <tfoot><tr><td colspan="6">Toplam ${d.lines.length} kalem</td></tr></tfoot>
           </table>
-          ${d.notes.length || d.adminNote ? `<section class="p-notes">
-            ${d.notes.length ? `<div><span>Notlar</span>${d.notes.map(t => `<p>${esc(t)}</p>`).join('')}</div>` : ''}
-            ${d.adminNote ? `<div><span>Yönetici notu</span><p>${esc(d.adminNote)}</p></div>` : ''}
+          ${d.notes.length ? `<section class="p-notes">
+            <div><span>Not</span>${d.notes.map(t => `<p>${esc(t)}</p>`).join('')}</div>
           </section>` : ''}
           <footer class="p-sign">
             <div><span>Hazırlayan</span><b>&nbsp;</b><small>İmza</small></div>
@@ -1177,7 +1186,7 @@
       <div class="order-box">
         <div class="ob-row"><div><b>Yeni sipariş</b><div class="small muted">${gap > 0 ? `Hedefe ${fmt(gap)} ${esc(it.unit)} eksik` : 'Elde + siparişte olan hedefi karşılıyor'}</div></div>
           <div class="stepper"><button data-o="-1">−</button><input id="ordQ" inputmode="decimal" value="${fmt(oq)}"><button data-o="1">+</button></div></div>
-        <input class="note-in" id="ordNote" placeholder="${can('siparis_direkt') ? 'Not (isteğe bağlı)' : 'Yöneticiye not (isteğe bağlı)'}">
+        <input class="note-in" id="ordNote" placeholder="${can('siparis_direkt') ? 'Tedarikçiye not (WhatsApp ve PDF\'te görünür)' : 'Bu malzeme için yöneticiye not'}">
         ${can('siparis_direkt')
           ? `<div class="btn-row">${sup.phone ? `<button class="btn wa" id="ordWa">WhatsApp ile gönder</button>` : ''}<button class="btn dark" id="ordMark">Sipariş verildi</button></div>`
           : `<button class="btn primary block" id="ordReq">Onaya gönder</button>`}
@@ -1200,9 +1209,9 @@
         oin?.addEventListener('input', () => { touched = true; redraw(); }); oin?.addEventListener('focus', () => oin.select());
         const place = via => {
           const q = num(oin.value); if (q <= 0) return toast('Sipariş miktarı gir');
-          const note = sh.querySelector('#ordNote').value.trim(), lines = [{ itemId: id, qty: q }];
+          const note = sh.querySelector('#ordNote').value.trim(), lines = [{ itemId: id, qty: q, ...(via === 'req' && note ? { note } : {}) }];
           let o;
-          if (via === 'req') { o = S.requestOrder(it.supplierId, lines, user.name, note); toast(S.lastMerged ? `${o.no} listesine eklendi` : `${o.no} onaya gönderildi`); }
+          if (via === 'req') { o = S.requestOrder(it.supplierId, lines, user.name); toast(S.lastMerged ? `${o.no} listesine eklendi` : `${o.no} onaya gönderildi`); }
           else {
             o = S.createOrder(it.supplierId, lines, user.name, note);
             if (via === 'wa') window.open(`https://wa.me/${sup.phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank');
@@ -1360,6 +1369,7 @@
     });
     if (r === 'siparis' && !window.__merging) { window.__merging = true; setTimeout(() => { S.mergeOpenOrders(); window.__merging = false; }, 0); }
     if (r === 'siparis') document.querySelectorAll('[data-onote]').forEach(i => { i.oninput = () => { ui.orderNotes[i.dataset.onote] = i.value; }; });
+    if (r === 'siparis') document.querySelectorAll('[data-lnote]').forEach(i => { i.oninput = () => { ui.lineNotes[i.dataset.lnote] = i.value.trim(); document.querySelector(`[data-act=ln-note][data-id="${i.dataset.lnote}"]`)?.classList.toggle('has', !!i.value.trim()); }; });
     if (r === 'siparis') document.querySelectorAll('[data-olq]').forEach(i => {
       i.onfocus = () => i.select();
       i.onchange = () => { ui.orderDraft[i.dataset.olq].qty = num(i.value); render(); };
@@ -1394,6 +1404,7 @@
       'wa-order': () => placeOrder(id, 'wa'),
       'mark-order': () => placeOrder(id, 'manual'),
       'request-order': () => placeOrder(id, 'request'),
+      'ln-note': () => { ui.lnOpen[id] = !ui.lnOpen[id] || !!ui.lineNotes[id]; render(); setTimeout(() => document.querySelector(`[data-lnote="${id}"]`)?.focus(), 30); },
       'review-order': () => reviewOrder(id),
       'pdf-order': () => openDoc({ type: 'order', ids: [id] }),
       'pdf-draft': () => openDoc({ type: 'draft' }),
