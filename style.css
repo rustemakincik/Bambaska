@@ -65,7 +65,7 @@ h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; c
 }
 .alert .big { font-size: 28px; font-weight: 800; color: var(--bad); line-height: 1; }
 .alert.ok { background: var(--ok-soft); } .alert.ok .big { color: var(--ok); }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; grid-gap: 10px; gap: 10px; }
 .dept-card { text-align: left; display: block; width: 100%; }
 .dept-card .ic { font-size: 24px; }
 .dept-card .nm { font-weight: 700; font-size: 16px; margin-top: 4px; }
@@ -174,14 +174,14 @@ h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; c
 .big-stepper button { width: 56px; height: 56px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 28px; font-weight: 700; }
 .big-stepper input { width: 120px; text-align: center; font-size: 40px; font-weight: 800; border: 0; background: transparent; outline: none; font-variant-numeric: tabular-nums; }
 .big-stepper .u { color: var(--muted); font-size: 14px; text-align: center; }
-.kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.kv { display: grid; grid-template-columns: repeat(3, 1fr); grid-gap: 8px; gap: 8px; margin-bottom: 14px; }
 .kv div { background: var(--bg); border-radius: 12px; padding: 10px; text-align: center; }
 .kv b { display: block; font-size: 18px; } .kv span { font-size: 11.5px; color: var(--muted); }
 
 .field { display: block; margin-bottom: 12px; }
 .field > span { display: block; font-size: 12.5px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
 .field input, .field select { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); outline: none; }
-.field-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-gap: 8px; gap: 8px; }
 .checks { display: flex; flex-wrap: wrap; gap: 8px; }
 .checks label { display: inline-flex; gap: 6px; align-items: center; background: var(--bg); padding: 8px 12px; border-radius: 10px; font-weight: 600; font-size: 14px; }
 
@@ -199,7 +199,7 @@ h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; c
 
 /* ---------- demirbaş */
 .st-pasif { --c: var(--muted); --cs: var(--line); }
-.stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 12px; }
+.stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); grid-gap: 6px; gap: 6px; margin-bottom: 12px; }
 .stat { background: var(--card); box-shadow: var(--shadow); border-radius: 14px; padding: 9px 2px 8px; text-align: center; border: 2px solid transparent; }
 .stat b { display: block; font-size: 20px; color: var(--c); line-height: 1.1; }
 .stat span { font-size: 10.5px; font-weight: 700; color: var(--muted); }
@@ -209,7 +209,7 @@ h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; c
 .qr-mini { width: 92px; height: 92px; flex: none; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); cursor: zoom-in; }
 .qr-mini svg, .qr-big svg, .lq svg { width: 100%; height: 100%; display: block; }
 .qr-big { width: 240px; height: 240px; margin: 6px auto 0; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); }
-.status-pick { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.status-pick { display: grid; grid-template-columns: repeat(5, 1fr); grid-gap: 6px; gap: 6px; }
 .status-pick button { padding: 10px 2px; border-radius: 12px; font-weight: 700; font-size: 12.5px; background: var(--bg); color: var(--muted); border: 2px solid transparent; }
 .status-pick button.on { background: var(--cs); color: var(--c); border-color: var(--c); }
 
@@ -217,11 +217,11 @@ h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; c
 .scan-btn { width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,.1); color: var(--brand-ink); display: grid; place-items: center; flex: none; }
 .scan-btn svg { width: 21px; height: 21px; }
 .scan-cta { margin-bottom: 12px; padding: 14px; font-size: 16px; }
-.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-top: 14px; }
+.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); grid-gap: 8px; gap: 8px; margin-top: 14px; }
 .info-grid div { background: var(--bg); border-radius: 12px; padding: 8px 10px; min-width: 0; }
 .info-grid span { display: block; font-size: 11px; color: var(--muted); font-weight: 700; }
 .info-grid b { display: block; font-size: 14px; overflow-wrap: anywhere; }
-.quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); grid-gap: 8px; gap: 8px; }
 .quick button { background: var(--cs); color: var(--c); border-radius: 14px; padding: 14px 10px; font-weight: 800; font-size: 15px; text-align: left; border: 2px solid transparent; }
 .quick button:active { border-color: var(--c); }
 .quick small { display: block; font-size: 11.5px; font-weight: 600; opacity: .8; margin-top: 2px; }
@@ -271,7 +271,7 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 :root[data-skin="lacivert"] { --bg: #eef1f6; --card: #fbfcfe; --ink: #1a2233; --muted: #6b7590; --line: #dbe1ec; --brand: #1b2a4a; --brand-ink: #f1e6c8; --accent: #b58b12; --accent-soft: #f5ecd0; }
 :root[data-skin="bordo"] { --bg: #f6eeee; --card: #fffafa; --ink: #2b1517; --muted: #8a6b6e; --line: #ecd9da; --brand: #4a1420; --brand-ink: #f6e3e5; --accent: #a3243b; --accent-soft: #f4d9de; }
 :root[data-skin="gecemavi"] { --bg: #0f1522; --card: #18202f; --ink: #e6ebf5; --muted: #8e9ab0; --line: #26324a; --brand: #0a0f19; --brand-ink: #e6ebf5; --accent: #4f8cff; --accent-soft: #1a2a4a; --ok-soft: #15301f; --warn-soft: #35290c; --bad-soft: #3a1a1a; color-scheme: dark; }
-.skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); grid-gap: 8px; gap: 8px; }
 .skin { background: var(--card); box-shadow: var(--shadow); border-radius: 14px; padding: 10px 12px; text-align: left; border: 2px solid transparent; }
 .skin.on { border-color: var(--accent); }
 .skin .sw { display: flex; margin-bottom: 6px; }
@@ -311,11 +311,14 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 @keyframes shake { 20%, 60% { transform: translateX(-9px) } 40%, 80% { transform: translateX(9px) } }
 .pin-msg { text-align: center; font-size: 13px; opacity: .65; min-height: 20px; margin-bottom: 16px; }
 .pin-msg.bad { color: #ffb4a3; opacity: 1; font-weight: 700; }
-.pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 300px; margin: 0 auto; width: 100%; }
-.pad button { height: 64px; border-radius: 50%; width: 64px; justify-self: center; background: rgba(255,255,255,.08); color: inherit; font-size: 26px; font-weight: 500; display: grid; place-items: center; }
+.pad { display: flex; flex-wrap: wrap; justify-content: space-between; margin: 0 auto; }
+.login > .pad.pad { width: 252px; max-width: 252px; } /* 3 tuş sığar, 4. sığmaz → her satır 3 tuş */
+.pad > * { flex: 0 0 64px; height: 64px; margin-bottom: 12px; }
+.pad button { height: 64px; border-radius: 50%; width: 64px; background: rgba(255,255,255,.08); color: inherit; font-size: 26px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; padding: 0; }
 .pad button:active { background: rgba(255,255,255,.22); }
 .pad.locked { opacity: .35; }
-@media (min-height: 760px) { .pad { gap: 16px; } .pad button { width: 72px; height: 72px; } }
+@media (min-height: 760px) { .pad > * { flex-basis: 72px; height: 72px; margin-bottom: 16px; } .pad button { width: 72px; height: 72px; } .login > .pad.pad { width: 280px; max-width: 280px; } }
 
 /* ---------- sipariş onayı */
 .seg button { font-size: 13.5px; padding: 9px 4px; }
@@ -340,7 +343,7 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .p-cafe { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
 .p-title { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #777; margin-top: 2px; }
 .p-meta { border-collapse: collapse; font-size: 12px; } .p-meta td { color: #777; padding: 1px 10px 1px 0; } .p-meta th { text-align: right; font-family: ui-monospace, Menlo, monospace; }
-.p-sup { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; margin: 16px 0; padding: 10px 12px; background: #f6f4f1; border-radius: 6px; }
+.p-sup { display: grid; grid-template-columns: 1.4fr 1fr 1fr; grid-gap: 10px; gap: 10px; margin: 16px 0; padding: 10px 12px; background: #f6f4f1; border-radius: 6px; }
 .p-sup span, .p-notes span, .p-sign span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: #888; font-weight: 700; }
 .p-sup b { font-size: 13.5px; }
 .p-table { width: 100%; border-collapse: collapse; }
@@ -349,9 +352,9 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .p-table .r { text-align: right; } .p-table .c { text-align: center; }
 .p-table .box { display: inline-block; width: 14px; height: 14px; border: 1.5px solid #555; border-radius: 3px; }
 .p-table tfoot td { border: 0; font-size: 11.5px; color: #777; padding-top: 8px; }
-.p-notes { display: grid; gap: 10px; margin-top: 14px; }
+.p-notes { display: grid; grid-gap: 10px; gap: 10px; margin-top: 14px; }
 .p-notes div { border-left: 3px solid #c2662d; padding: 4px 10px; } .p-notes p { margin: 2px 0 0; }
-.p-sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 34px; }
+.p-sign { display: grid; grid-template-columns: repeat(3, 1fr); grid-gap: 14px; gap: 14px; margin-top: 34px; }
 .p-sign div { border-top: 1px solid #1a1a1a; padding-top: 6px; min-height: 60px; }
 .p-sign b { display: block; font-size: 13px; } .p-sign small { color: #888; font-size: 11px; }
 @media (max-width: 480px) { .paper { padding: 18px 14px; font-size: 12px; } .p-sup { grid-template-columns: 1fr 1fr; } .p-cafe { font-size: 18px; } }
@@ -544,7 +547,7 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 
   /* iki sütunlu listeler */
   main.r-stok > .list, main.r-sayim > .list, main.r-demirbas > .list {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: none; box-shadow: none; overflow: visible; }
+    display: grid; grid-template-columns: 1fr 1fr; grid-gap: 10px; gap: 10px; background: none; box-shadow: none; overflow: visible; }
   main.r-stok > .list > .row, main.r-sayim > .list > .row, main.r-demirbas > .list > .row {
     background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); border-top: 0; }
   main.r-sayim > .list > .row.changed { background: var(--accent-soft); }
@@ -612,3 +615,17 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .ro-tag { font-size: 10px; font-weight: 800; letter-spacing: .4px; padding: 1px 6px; border-radius: 4px; background: var(--line); color: var(--muted); vertical-align: 2px; margin-left: 4px; }
 .ro-card { margin-bottom: 12px; box-shadow: none; background: #ece3f7; color: #2a1745; }
 #uRole button { font-size: 12.5px; padding: 9px 2px; }
+
+/* ---------- esnek kutularda 'gap' desteklemeyen eski Safari (iOS 10–14.0) için yedek boşluklar.
+   compat.js destek yoksa <html>'e .nfg sınıfı ekler. */
+.nfg .btn-row > * + *, .nfg .toolbar > * + *, .nfg .manual > * + *, .nfg .lb-top > * + * { margin-left: 8px; }
+.nfg .chips > * { margin-right: 8px; }
+.nfg .row > * + *, .nfg .user-row > * + *, .nfg .login-top > * + *, .nfg .ob-step > * + *, .nfg .sup-head > * + * { margin-left: 12px; }
+.nfg .order-line > * + *, .nfg .ob-row > * + *, .nfg .label > * + *, .nfg .perm-row > * + *, .nfg .radio-row > * + * { margin-left: 10px; }
+.nfg .brand > * + *, .nfg .topbar > * + * { margin-left: 10px; }
+.nfg .setup-opt > * + *, .nfg .big-stepper > * + *, .nfg .logo-pick > * + * { margin-left: 14px; }
+.nfg .legend > * { margin-right: 12px; margin-bottom: 4px; }
+.nfg .checks label { margin: 0 8px 8px 0; } .nfg .checks label > * + * { margin-left: 6px; }
+.nfg .demo-banner > * + * { margin-left: 6px; }
+.nfg .stat-grid, .nfg .grid2 { grid-gap: 10px; }
+.nfg .pin-dots > * + * { margin-left: 16px; }

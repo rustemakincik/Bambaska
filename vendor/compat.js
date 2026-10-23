@@ -14,6 +14,16 @@
     Promise.prototype.finally = function (f) { return this.then(function (v) { return Promise.resolve(f()).then(function () { return v; }); }, function (e) { return Promise.resolve(f()).then(function () { throw e; }); }); };
   }
   if (window.NodeList && !NodeList.prototype.forEach) NodeList.prototype.forEach = Array.prototype.forEach;
+  // esnek kutularda 'gap' desteği (Safari 14.1+). Yoksa <html class="nfg"> → CSS yedek boşlukları
+  function flexGap() {
+    try {
+      var d = document.createElement('div');
+      d.style.cssText = 'display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden';
+      d.appendChild(document.createElement('div')); d.appendChild(document.createElement('div'));
+      document.documentElement.appendChild(d); var ok = d.scrollHeight === 1; d.parentNode.removeChild(d); return ok;
+    } catch (e) { return true; }
+  }
+  if (!flexGap()) document.documentElement.className += ' nfg';
   // dinamik import desteği var mı? (Safari 11.1+). Yoksa bulut senkronu kapalı kalır, uygulama yine açılır.
   try { new Function('u', 'return import(u)'); window.__canImport = true; } catch (e) { window.__canImport = false; }
 })();
