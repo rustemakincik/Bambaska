@@ -426,3 +426,17 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .jb-row span { opacity: .6; } .jb-row b { font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; text-align: right; }
 .join-msg { min-height: 20px; font-size: 13px; color: #ffcf9a; margin-bottom: 8px; }
 .big-btn { padding: 16px; font-size: 17px; }
+
+/* sipariş formu başlığı: dar ekranda taşmasın */
+.p-head { flex-wrap: wrap; row-gap: 12px; }
+.p-head > div:first-child { flex: 1 1 260px; min-width: 0; }
+.p-meta { flex: none; margin-left: auto; }
+.p-meta th { white-space: nowrap; }
+.b-doc .b-name { white-space: normal; line-height: 1.15; }
+@media (max-width: 560px) {
+  .p-meta { width: 100%; margin-left: 0; border-top: 1px solid #e3e0dc; }
+  .p-meta tr { display: inline-flex; gap: 6px; margin-right: 14px; padding-top: 6px; }
+  .p-meta td, .p-meta th { padding: 0; text-align: left; }
+  .b-doc .b-logo { height: 40px; }
+}
+@media print { .p-meta { width: auto; margin-left: auto; border-top: 0; } .p-meta tr { display: table-row; } .p-meta td { padding: 1px 10px 1px 0; } .p-meta th { text-align: right; } }

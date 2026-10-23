@@ -1,5 +1,5 @@
 // KafeStok — çevrimdışı önbellek
-const CACHE = 'kafestok-v7';
+const CACHE = 'kafestok-v8';
 const JSQR = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
 const FILES = ['./', 'index.html', 'style.css', 'store.js', 'app.js', 'vendor/qr.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-180.png', 'logo.png', 'config.js', 'sync.js', 'firebase-backend.js'];
 // okuyucu kütüphanesini de önbelleğe almaya çalış (internet yoksa sorun değil)
