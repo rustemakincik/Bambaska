@@ -1,0 +1,36 @@
+rules_version = '2';
+// Bambaşka / KafeStok — Firestore güvenlik kuralları
+// Firebase Console → Firestore Database → Rules sekmesine bu metnin tamamını yapıştırıp "Publish" de.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function cafePath(cafeId) { return /databases/$(database)/documents/cafes/$(cafeId); }
+    function isMember(cafeId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/cafes/$(cafeId)/members/$(request.auth.uid));
+    }
+
+    match /cafes/{cafeId} {
+      // ilk kurulum: kafe kaydı bir kez oluşturulur, sonra değiştirilemez
+      allow create: if request.auth != null
+        && !exists(cafePath(cafeId))
+        && request.resource.data.joinCode is string
+        && request.resource.data.joinCode.size() >= 16;
+      allow read: if isMember(cafeId);
+      allow update, delete: if false;
+
+      // cihaz katılımı: sadece doğru katılım kodunu bilen cihaz üye olabilir
+      match /members/{uid} {
+        allow create, update: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.code == get(cafePath(cafeId)).data.joinCode;
+        allow read, delete: if isMember(cafeId);
+      }
+
+      // kafe verileri: sadece üye cihazlar
+      match /{coll}/{docId} {
+        allow read, write: if coll != 'members' && isMember(cafeId);
+      }
+    }
+  }
+}
