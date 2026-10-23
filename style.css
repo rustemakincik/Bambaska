@@ -663,3 +663,6 @@ a.btn { text-decoration: none; }
 .sup-tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 11.5px; font-weight: 600; vertical-align: 1px; }
 .rv-hint { margin: 4px 2px 8px; }
 .order-line > input[data-rvp] { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.date-chip { position: relative; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.nfg .date-chip > span { margin-left: 4px; }
+.date-chip input[type=date] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }

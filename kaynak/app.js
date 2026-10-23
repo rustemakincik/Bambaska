@@ -641,7 +641,7 @@
   const contactors = o => S.get().users.filter(u => u.role !== 'yonetici' && u.role !== 'gelistirici' && hasPerm(u, 'tedarikci_iletisim')
     && (u.role !== 'personel' || !u.deptIds?.length || o.lines.some(l => u.deptIds.includes(S.item(l.itemId)?.deptId))));
   const etaTxt = t => { if (!t) return ''; const d = new Date(t), n = new Date(); n.setHours(0, 0, 0, 0); const diff = Math.round((new Date(d).setHours(0, 0, 0, 0) - n) / 864e5);
-    return diff === 0 ? 'bugün' : diff === 1 ? 'yarın' : diff === -1 ? 'dün' : d.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'short' }); };
+    return diff === 0 ? 'bugün' : diff === 1 ? 'yarın' : diff === -1 ? 'dün' : d.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }); };
   const visibleOrders = () => S.get().orders.filter(o => viewAll() || can('siparis_onay') || can('siparis_direkt') || isMine(o)
     || (can('teslim') && ['verildi', 'alisveris', 'teslim'].includes(o.status)) || o.shopper === user.name || (o.status !== 'onay' && canContact(o)));
   const myNeeds = () => {
@@ -1778,16 +1778,24 @@
     const draw = sh => {
       sh.querySelectorAll('[data-to]').forEach(b => b.classList.toggle('on', b.dataset.to === to));
       sh.querySelectorAll('[data-due]').forEach(b => b.classList.toggle('on', b.dataset.due === dueKey));
+      sh.querySelector('#asDateChip').classList.toggle('on', dueKey === 'd');
+      sh.querySelector('#asDateTxt').textContent = dueKey === 'd' && due ? new Date(due).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'short' }) : 'Tarih seç';
       const b = sh.querySelector('#asOk'); b.disabled = !to; b.textContent = to ? `${to} alsın` : 'Kim alacak? Seç';
     };
     sheet(`<h3>🛒 Alışverişe gönder</h3><div class="sub">${esc(sup?.name || 'Market')} · ${esc(o.no)} · ${o.lines.length} kalem. Seçtiğin kişi listeyi uygulamada görür, aldıklarını işaretleyip stoğa ekler.</div>
       <div class="field"><span>Kim alacak?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0">${people.map(u => `<button class="chip" data-to="${esc(u.name)}">${esc(u.name)} <small class="muted">${roleName(u.role)}</small></button>`).join('')}</div></div>
-      <div class="field"><span>Ne zaman?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0"><button class="chip" data-due="0">Bugün</button><button class="chip" data-due="1">Yarın</button></div></div>
+      <div class="field"><span>Ne zaman?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0"><button class="chip" data-due="0">Bugün</button><button class="chip" data-due="1">Yarın</button>
+        <label class="chip date-chip" id="asDateChip">📅 <span id="asDateTxt">Tarih seç</span><input type="date" id="asDate"></label></div></div>
       <label class="field"><span>Not <em class="fhint">alacak kişiye</em></span><input id="asNote" placeholder="örn. Metro'dan al, fişi getir · kasadan 1500 ₺ verildi" value="${esc(o.shopNote || '')}"></label>
       <button class="btn primary block" id="asOk"></button>`, sh => {
       draw(sh);
       sh.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { to = b.dataset.to; draw(sh); });
-      sh.querySelectorAll('[data-due]').forEach(b => b.onclick = () => { dueKey = dueKey === b.dataset.due ? '' : b.dataset.due; due = dueKey ? day(+dueKey) : null; draw(sh); });
+      sh.querySelectorAll('[data-due]').forEach(b => b.onclick = () => { dueKey = dueKey === b.dataset.due ? '' : b.dataset.due; due = dueKey ? day(+dueKey) : null; sh.querySelector('#asDate').value = ''; draw(sh); });
+      const dIn = sh.querySelector('#asDate');
+      dIn.onclick = () => { try { dIn.showPicker(); } catch (x) {} };
+      const t0 = new Date(); dIn.min = `${t0.getFullYear()}-${String(t0.getMonth() + 1).padStart(2, '0')}-${String(t0.getDate()).padStart(2, '0')}`;
+      dIn.onchange = () => { const v = dIn.value; if (v) { const [y, m, d] = v.split('-').map(Number); due = new Date(y, m - 1, d, 12).getTime(); dueKey = 'd'; } else if (dueKey === 'd') { due = null; dueKey = ''; } draw(sh); };
+      if (o.shopDue) { const diff = Math.round((new Date(o.shopDue).setHours(12, 0, 0, 0) - day(0)) / 864e5); if (diff === 0 || diff === 1) dueKey = String(diff); else { dueKey = 'd'; } due = o.shopDue; draw(sh); }
       sh.querySelector('#asOk').onclick = () => {
         S.assignShopper(oid, user.name, { to, note: sh.querySelector('#asNote').value.trim(), due });
         ui.sipTab = 'yolda'; closeSheet(); render(); toast(`${o.no} → ${to} alışverişe gidecek`);
