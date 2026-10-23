@@ -203,6 +203,7 @@
 
   function render() {
     if (route() === 'katil') { if (S.isDemo) { S.setMode('real'); return; } return renderJoin(); }
+    if (route() === 'n' && user) { const id = routeArg(), e = events().find(x => x.id === id); history.replaceState(null, '', '#/home'); if (e) { setTimeout(() => openEvent(e), 0); } }
     if (user) user = S.user(user.id) || user;
     if (!user) { if (route() === 'd') pendingDeep = location.hash; return renderLogin(); }
     const r = route();
@@ -219,10 +220,11 @@
           <h1>${r === 'home' || !titles[r] ? brandHTML('bar') : esc(titles[r])}</h1>
           <div class="sub">${S.isDemo ? '<span class="demo-pill">DEMO</span>' : ''}${syncLabel()}</div>
         </div>
+        ${bellHTML()}
         <button class="scan-btn" data-act="scan" aria-label="Karekod okut"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg></button>
         <button class="avatar" data-act="profile" aria-label="Profil">${esc(initials(user.name))}</button>
       </header>
-      <main>${view()}</main>
+      <main class="r-${r === 'd' ? 'demirbas' : r}">${view()}</main>
       <nav class="nav">
         ${[['home', 'Özet'], ['stok', 'Stok'], ['sayim', 'Sayım'], ['siparis', 'Sipariş'], ['demirbas', 'Demirbaş']].map(([k, l]) =>
           `<a href="#/${k}" class="${r === k || (k === 'demirbas' && r === 'd') ? 'on' : ''}">${ICON[k]}${l}${k === 'siparis' && can('siparis_onay') && onayN ? `<span class="pip warn">${onayN}</span>` : k === 'siparis' && crit ? `<span class="pip">${crit}</span>` : ''}</a>`).join('')}
@@ -292,7 +294,7 @@
       if (u && u.pin === pin) {
         user = u; pin = ''; loginUser = null; fails = 0; clearTimeout(clockT);
         try { localStorage.setItem(UKEY, u.id); localStorage.setItem(LKEY, u.id); } catch (e) {}
-        location.hash = pendingDeep || '#/home'; pendingDeep = null; render(); return;
+        location.hash = pendingDeep || '#/home'; pendingDeep = null; render(); checkNotify(); return;
       }
       fails++; pin = '';
       if (fails >= 5) { lockUntil = Date.now() + 30000; fails = 0; }
@@ -1224,26 +1226,134 @@
     }
   }
 
+  // ---------- BİLDİRİMLER
+  // Ayrı veri tutulmaz: sipariş/demirbaş/sayım geçmişinden, giriş yapan kişiyi ilgilendirenler türetilir.
+  const nKey = k => `kafestok.${S.isDemo ? 'demo.' : ''}${k}.${user?.id}`;
+  const nGet = k => { try { return JSON.parse(localStorage.getItem(nKey(k))); } catch (e) { return null; } };
+  const nSet = (k, v) => { try { localStorage.setItem(nKey(k), JSON.stringify(v)); } catch (e) {} };
+  const notifyOn = () => { try { return localStorage.getItem('kafestok.notify') === '1'; } catch (e) { return false; } };
+
+  function events() {
+    if (!user) return [];
+    const db = S.get(), me = user.name, since = Date.now() - 7 * 864e5, out = [];
+    const supName = o => S.supplier(o.supplierId)?.name || 'Tedarikçi';
+    db.orders.forEach(o => (o.log || []).forEach((l, i) => {
+      if (!l.at || l.at < since || l.user === me) return;
+      const id = `o:${o.id}:${i}`;
+      if (['onaya_gonderdi', 'ekledi'].includes(l.action) && can('siparis_onay') && o.status === 'onay')
+        out.push({ id, at: l.at, icon: '⏳', title: `${l.user} onaya sipariş gönderdi`, body: `${o.no} · ${supName(o)}`, hash: '#/siparis', tab: 'onay' });
+      else if (l.action === 'onayladi' && isMine(o))
+        out.push({ id, at: l.at, icon: '✅', title: `${o.no} onaylandı`, body: `${supName(o)}${o.adminNote ? ' · ' + o.adminNote : ''}`, hash: '#/siparis', tab: 'yolda' });
+      else if (l.action === 'reddetti' && isMine(o))
+        out.push({ id, at: l.at, icon: '✖️', title: `${o.no} reddedildi`, body: o.adminNote || supName(o), hash: '#/siparis', tab: 'gecmis' });
+      else if (l.action === 'teslim_aldi' && (isMine(o) || can('siparis_onay')))
+        out.push({ id, at: l.at, icon: '📦', title: `${o.no} teslim alındı`, body: `${supName(o)} · ${l.user}`, hash: '#/siparis', tab: 'gecmis' });
+    }));
+    if (isAdmin() || can('demirbas_yonet') || can('demirbas_durum')) db.assetLog.forEach(l => {
+      if (!l.at || l.at < since || l.user === me || !l.from) return;
+      const a = db.assets.find(x => x.id === l.assetId); if (!a) return;
+      if (['arizali', 'kayip'].includes(l.to))
+        out.push({ id: `a:${l.id}`, at: l.at, icon: l.to === 'kayip' ? '❓' : '⚠️', title: `${a.name} ${l.to === 'kayip' ? 'kayıp' : 'arızalı'}`, body: `${a.code} · ${l.user}${l.note ? ' · ' + l.note : ''}`, hash: '#/demirbas', asset: a.id });
+      else if (l.to === 'aktif' && ['arizali', 'tamirde', 'kayip'].includes(l.from))
+        out.push({ id: `a:${l.id}`, at: l.at, icon: '🔧', title: `${a.name} tekrar aktif`, body: `${a.code} · ${l.user}${l.note ? ' · ' + l.note : ''}`, hash: '#/demirbas', asset: a.id });
+    });
+    if (can('siparis_hazirla') || can('siparis_direkt')) {
+      const ds = new Set(myDepts().map(d => d.id));
+      db.movements.forEach(m => {
+        if (!m.at || m.at < since || m.user === me) return;
+        const it = S.item(m.itemId); if (!it || !ds.has(it.deptId)) return;
+        if (m.before > it.min && m.after <= it.min)
+          out.push({ id: `m:${m.id}`, at: m.at, icon: '🔴', title: `${it.name} kritik seviyede`, body: `${fmt(m.after)} ${it.unit} kaldı · ${m.user}`, hash: '#/stok', item: it.id });
+      });
+    }
+    return out.sort((a, b) => b.at - a.at).slice(0, 40);
+  }
+  function unreadCount() { const read = new Set(nGet('nread') || []); return events().filter(e => !read.has(e.id)).length; }
+  function bellHTML() { const n = user ? unreadCount() : 0; return `<button class="bell" data-act="notif" aria-label="Bildirimler"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>${n ? `<span class="pip">${n > 9 ? '9+' : n}</span>` : ''}</button>`; }
+  function openEvent(e) {
+    closeSheet(true);
+    if (e.tab) ui.sipTab = e.tab;
+    if (location.hash !== e.hash) location.hash = e.hash; else render();
+    if (e.asset) setTimeout(() => openAsset(e.asset), 80);
+    if (e.item) setTimeout(() => openItem(e.item), 80);
+  }
+  function openNotifs() {
+    const evs = events(), read = new Set(nGet('nread') || []);
+    nSet('nread', [...new Set([...evs.map(e => e.id), ...read])].slice(-400));
+    sheet(`
+      <h3>Bildirimler</h3><div class="sub">Son 7 gün · sana ait olanlar</div>
+      ${!notifyOn() ? `<button class="card small notif-cta" data-act="go-notif-settings">🔔 Telefona da bildirim gelsin mi? <b>Aç ›</b></button>` : ''}
+      <div class="list">${evs.map(e => `<button class="row notif ${read.has(e.id) ? '' : 'new'}" data-ev="${esc(e.id)}">
+        <span class="n-ic">${e.icon}</span><div class="main"><div class="t">${esc(e.title)}</div><div class="s">${esc(e.body)} · ${ago(e.at)}</div></div>${read.has(e.id) ? '' : '<span class="n-dot"></span>'}</button>`).join('')
+        || '<div class="empty"><div class="e">🔕</div>Henüz bildirim yok</div>'}</div>`,
+      sh => sh.querySelectorAll('[data-ev]').forEach(b => b.onclick = () => openEvent(evs.find(e => e.id === b.dataset.ev))));
+    document.querySelectorAll('.bell .pip').forEach(p => p.remove());
+  }
+  // yeni olayları yakala: uygulama açıkken bildirim kutusu, arka plandayken telefon bildirimi
+  function checkNotify() {
+    if (!user) return;
+    const evs = events(), seenArr = nGet('nseen');
+    if (!seenArr) { nSet('nseen', evs.map(e => e.id)); if (!nGet('nread')) nSet('nread', evs.map(e => e.id)); return; }
+    const seen = new Set(seenArr), fresh = evs.filter(e => !seen.has(e.id)).reverse();
+    if (!fresh.length) return;
+    nSet('nseen', [...seenArr, ...fresh.map(e => e.id)].slice(-400));
+    document.querySelectorAll('.topbar .bell').forEach(b => { b.outerHTML = bellHTML(); });
+    const last = fresh[fresh.length - 1];
+    if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+    if (document.visibilityState === 'visible') toast(`${last.icon} ${last.title}`);
+    else if (notifyOn() && 'Notification' in window && Notification.permission === 'granted') fresh.slice(-3).forEach(sysNotify);
+  }
+  function sysNotify(e) {
+    const opts = { body: e.body, icon: 'icon-192.png', badge: 'icon-192.png', tag: e.id, data: { url: location.pathname + '#/n/' + encodeURIComponent(e.id) } };
+    const title = `${e.icon} ${e.title}`;
+    (navigator.serviceWorker?.getRegistration?.() || Promise.resolve(null))
+      .then(reg => reg ? reg.showNotification(title, opts) : new Notification(title, opts)).catch(() => { try { new Notification(title, opts); } catch (x) {} });
+  }
+  const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function notifySection() {
+    const sup = 'Notification' in window, perm = sup ? Notification.permission : 'yok', on = notifyOn() && perm === 'granted';
+    let state;
+    if (!sup) state = isIOS() && !isStandalone() ? 'iPhone/iPad’de bildirim için uygulamayı <b>Paylaş → Ana Ekrana Ekle</b> ile kurup <b>ana ekrandaki simgeden</b> aç.' : 'Bu tarayıcı telefon bildirimini desteklemiyor.';
+    else if (perm === 'denied') state = 'Bildirim izni kapalı. Telefon ayarlarından bu uygulamaya bildirim izni ver.';
+    else state = on ? 'Açık. Yeni bir şey olunca telefonuna bildirim düşer.' : 'Kapalı. Sadece uygulama içindeki 🔔 listesinde görünür.';
+    return `<h2 class="section">Bildirimler</h2>
+      <div class="card stack small">
+        <div style="display:flex;gap:10px;align-items:flex-start"><span style="font-size:24px">${on ? '🔔' : '🔕'}</span><div>${state}</div></div>
+        ${sup && perm !== 'denied' ? `<div class="btn-row">${on ? `<button class="btn sm" data-act="notif-off">Kapat</button><button class="btn primary sm" data-act="notif-test">Deneme bildirimi</button>` : `<button class="btn primary sm" data-act="notif-on">Telefon bildirimlerini aç</button>`}</div>` : ''}
+        <div class="muted">Uygulama açıkken veya arka plandayken gelir. Telefon kilitliyken ve uygulama tamamen kapalıyken gelmesi için sunucu kurulumu gerekir.</div>
+      </div>`;
+  }
+  async function enableNotify() {
+    try {
+      const p = await Notification.requestPermission();
+      if (p === 'granted') { try { localStorage.setItem('kafestok.notify', '1'); } catch (e) {} toast('Bildirimler açıldı'); sysNotify({ id: 'test', icon: '🔔', title: 'Bildirimler açık', body: `${S.get().cafe.name} · böyle görünecek` }); }
+      else toast('İzin verilmedi');
+    } catch (e) { toast('Bildirim izni alınamadı'); }
+    render();
+  }
+
   // ---------- AYARLAR
   function viewAyarlar() {
     const db = S.get();
     const profile = `<div class="card" style="display:flex;align-items:center;gap:12px">
         <div class="avatar" style="width:46px;height:46px">${esc(initials(user.name))}</div>
         <div style="flex:1"><b>${esc(user.name)}</b><div class="small muted">${roleName(user.role)}${isAdmin() ? '' : ' · ' + esc(myDepts().map(d => d.name).join(', '))}</div></div>
-        <button class="btn sm" data-act="logout">Çıkış</button></div>`;
+        <button class="btn sm" data-act="logout">Çıkış</button></div>
+      <div class="list" style="margin-top:10px"><button class="row" data-act="my-pin"><span style="font-size:20px">🔑</span><div class="main"><div class="t">PIN'imi değiştir</div><div class="s">Giriş şifren · 4 rakam</div></div><span class="muted">›</span></button></div>`;
     const cur = getSkin();
     const themes = `<h2 class="section">Tema</h2>
       <div class="skins">${SKINS.map(t => `<button class="skin ${cur === t.id ? 'on' : ''}" data-act="skin" data-id="${t.id}">
         <span class="sw"><i style="background:${t.c[0]}"></i><i style="background:${t.c[1]}"></i><i style="background:${t.c[2]}"></i></span>
         <b>${t.name}</b>${t.d ? `<small>${t.d}</small>` : ''}</button>`).join('')}</div>`;
     const sec = (title, act, rows) => `<h2 class="section">${title}</h2><div class="list">${rows}<button class="row" data-act="${act}" style="color:var(--accent);font-weight:700">+ Ekle</button></div>`;
-    let out = profile + cloudSection();
+    let out = profile + cloudSection() + notifySection();
     if (isAdmin()) out += `
       <h2 class="section">Kafe</h2>
       <div class="list"><button class="row" data-act="edit-cafe">
         <div class="cafe-thumb">${db.cafe.logo ? `<img src="${db.cafe.logo}" alt="">` : '☕'}</div>
         <div class="main"><div class="t">${esc(db.cafe.name)}</div><div class="s">Logo ve isim · ${CAFE_MODES.find(x => x[0] === cafeMode())[1]}</div></div><span class="muted">›</span></button></div>
-      ${sec('Kullanıcılar ve yetkiler', 'new-user', db.users.map(u => `<button class="row" data-act="edit-user" data-id="${u.id}"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)} <span class="role-tag r-${u.role}">${roleName(u.role)}</span></div><div class="s">${u.role === 'yonetici' ? 'Tüm yetkiler' : esc(permSummary(u))}</div></div><span class="muted">›</span></button>`).join(''))}`;
+      ${sec('Kullanıcılar ve yetkiler', 'new-user', `<button class="row pin-toggle" data-act="show-pins"><span style="font-size:18px">${ui.showPins ? '🙈' : '👁️'}</span><div class="main"><div class="t">${ui.showPins ? "PIN'leri gizle" : "PIN'leri göster"}</div><div class="s">Sadece yönetici görebilir</div></div></button>` + db.users.map(u => `<button class="row" data-act="edit-user" data-id="${u.id}"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)} <span class="role-tag r-${u.role}">${roleName(u.role)}</span></div><div class="s">${u.role === 'yonetici' ? 'Tüm yetkiler' : esc(permSummary(u))}</div></div><span class="pin-chip ${ui.showPins ? 'on' : ''}">${ui.showPins ? esc(u.pin) : '••••'}</span><span class="muted">›</span></button>`).join(''))}`;
     if (can('malzeme')) out += sec('Malzemeler', 'new-item', `<button class="row" data-act="tpl-import" style="color:var(--accent);font-weight:700">📋 Örnek listeden ekle</button>` + db.depts.map(d => {
       const n = db.items.filter(i => i.deptId === d.id).length;
       return `<button class="row" data-act="manage-items" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div><div class="s">${n} malzeme</div></div><span class="muted">›</span></button>`;
@@ -1265,6 +1375,31 @@
     const p = permsOf(u), on = PERMS.flatMap(g => g[1]).filter(x => p[x[0]]);
     const depts = (u.deptIds || []).map(d => S.dept(d)?.name).filter(Boolean);
     return [depts.length && !p.sayim_tum ? 'Sayım: ' + depts.join(', ') : p.sayim_tum ? 'Tüm bölümler' : '', `${on.length} yetki`].filter(Boolean).join(' · ');
+  }
+
+  function openMyPin() {
+    sheet(`
+      <h3>PIN'imi değiştir</h3><div class="sub">${esc(user.name)} · yeni PIN bir sonraki girişte geçerli</div>
+      <label class="field"><span>Şu anki PIN</span><input id="pOld" inputmode="numeric" maxlength="4" type="password" autocomplete="off"></label>
+      <div class="field-row" style="grid-template-columns:1fr 1fr">
+        <label class="field"><span>Yeni PIN</span><input id="pNew" inputmode="numeric" maxlength="4" type="password" autocomplete="off"></label>
+        <label class="field"><span>Yeni PIN tekrar</span><input id="pNew2" inputmode="numeric" maxlength="4" type="password" autocomplete="off"></label>
+      </div>
+      <div class="small muted" id="pMsg" style="margin-bottom:10px">${isAdmin() ? '' : 'Unutursan yönetici PIN’ini görüp sana söyleyebilir.'}</div>
+      <button class="btn primary block" id="pGo">PIN'i değiştir</button>`,
+      sh => {
+        sh.querySelector('#pGo').onclick = () => {
+          const v = id => sh.querySelector(id).value.trim(), msg = sh.querySelector('#pMsg');
+          const me = S.user(user.id);
+          if (v('#pOld') !== me.pin) return (msg.textContent = '⚠️ Şu anki PIN yanlış');
+          if (!/^\d{4}$/.test(v('#pNew'))) return (msg.textContent = '⚠️ Yeni PIN 4 rakam olmalı');
+          if (v('#pNew') !== v('#pNew2')) return (msg.textContent = '⚠️ Yeni PIN’ler aynı değil');
+          if (v('#pNew') === me.pin) return (msg.textContent = '⚠️ Yeni PIN eskisiyle aynı');
+          if (!S.isDemo && v('#pNew') === '0000') return (msg.textContent = '⚠️ 0000 demo için ayrıldı');
+          S.upsert('users', { ...me, pin: v('#pNew') }); user = S.user(user.id);
+          closeSheet(); render(); toast('PIN değiştirildi');
+        };
+      });
   }
 
   // ---------- alt sayfa (sheet)
@@ -1524,6 +1659,13 @@
       'login-back': () => { loginUser = null; pin = ''; pinErr = ''; renderLogin(); },
       'demo-pins': () => { showDemo = !showDemo; renderLogin(); },
       'go-demo': () => S.setMode('demo'),
+      'my-pin': () => openMyPin(),
+      notif: () => openNotifs(),
+      'notif-on': () => enableNotify(),
+      'notif-off': () => { try { localStorage.setItem('kafestok.notify', '0'); } catch (e) {} render(); toast('Telefon bildirimleri kapatıldı'); },
+      'notif-test': () => { sysNotify({ id: 'test' + Date.now(), icon: '🔔', title: 'Deneme bildirimi', body: `${S.get().cafe.name} · bildirimler çalışıyor` }); toast('Deneme bildirimi gönderildi'); },
+      'go-notif-settings': () => { closeSheet(true); location.hash = '#/ayarlar'; setTimeout(() => document.querySelector('[data-act=notif-on]')?.scrollIntoView({ block: 'center' }), 120); },
+      'show-pins': () => { ui.showPins = !ui.showPins; render(); },
       'exit-demo': () => S.setMode('real'),
       'setup-new': () => openSetupNew(),
       'tpl-import': () => openTemplate(),
@@ -1621,6 +1763,8 @@
     render();
   }
   S.subscribe(renderSafe);
+  S.subscribe(() => setTimeout(checkNotify, 0));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(checkNotify, 300); });
   Sync.start();
   window.addEventListener('hashchange', () => { stopScan(); closeSheet(true); render(); window.scrollTo(0, 0); });
   render();

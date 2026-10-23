@@ -522,3 +522,87 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .sticky-sheet-btn { position: sticky; bottom: -18px; background: linear-gradient(to top, var(--card) 75%, transparent); padding: 14px 0 6px; }
 .st-yeni { --c: var(--muted); --cs: var(--line); }
 .badge.st-yeni, .dot.st-yeni { }
+
+/* =========================================================
+   TABLET (≥ 760px): sol menü şeridi, geniş içerik, iki sütun
+   ========================================================= */
+@media (min-width: 760px) {
+  :root { --rail: 92px; }
+  body { padding-bottom: 24px; padding-left: var(--rail); }
+  .nav { top: 0; bottom: 0; left: 0; right: auto; width: var(--rail); height: auto; flex-direction: column; justify-content: flex-start;
+    padding: calc(env(safe-area-inset-top) + 92px) 0 env(safe-area-inset-bottom); border-top: 0; border-right: 1px solid var(--line); gap: 6px; }
+  .nav a { flex: none; height: 74px; font-size: 12px; margin: 0 10px; border-radius: 16px; }
+  .nav a.on { background: var(--accent-soft); }
+  .nav a svg { width: 26px; height: 26px; }
+  .nav .pip { top: 8px; margin-left: 8px; }
+  .topbar { padding-left: 24px; padding-right: 24px; }
+  main { max-width: 1040px; padding: 20px 28px; }
+  main.r-home, main.r-ayarlar { max-width: 860px; }
+  .grid2 { grid-template-columns: repeat(4, 1fr); }
+  .chips { margin: 0 0 14px; padding: 2px 0 4px; flex-wrap: wrap; overflow: visible; }
+
+  /* iki sütunlu listeler */
+  main.r-stok > .list, main.r-sayim > .list, main.r-demirbas > .list {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: none; box-shadow: none; overflow: visible; }
+  main.r-stok > .list > .row, main.r-sayim > .list > .row, main.r-demirbas > .list > .row {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); border-top: 0; }
+  main.r-sayim > .list > .row.changed { background: var(--accent-soft); }
+  main.r-stok > .list > .empty, main.r-sayim > .list > .empty, main.r-demirbas > .list > .empty { grid-column: 1 / -1; background: var(--card); border-radius: var(--radius); }
+  main.r-stok > .list > .row .bar { max-width: none; }
+
+  /* sipariş: kartlar iki sütun */
+  main.r-siparis { columns: 2; column-gap: 16px; }
+  main.r-siparis > * { break-inside: avoid; }
+  main.r-siparis > .seg, main.r-siparis > .card.small, main.r-siparis > .empty, main.r-siparis > .btn.block, main.r-siparis > .small.muted { column-span: all; }
+  main.r-siparis > .card { display: inline-block; width: 100%; }
+
+  /* ana sayfa: üst kartlar iki sütun */
+  main.r-home > .alert, main.r-home > .card:not(.onboard):not(.dept-card) { margin-top: 10px; }
+
+  /* alt pencereler ortada */
+  .sheet { left: 50%; top: 50%; right: auto; bottom: auto; width: min(620px, calc(100vw - var(--rail) - 48px)); margin-left: calc(var(--rail) / 2);
+    max-height: 88vh; border-radius: 24px; padding: 8px 26px 22px; opacity: 0; transform: translate(-50%, calc(-50% + 30px)); transition: transform .22s cubic-bezier(.2,.8,.2,1), opacity .18s; }
+  .sheet.show { opacity: 1; transform: translate(-50%, -50%); }
+  .sheet .grab { display: none; }
+  .sticky-action { left: var(--rail); bottom: 0; padding: 12px 28px 18px; }
+  .sticky-action .btn { max-width: 520px; }
+  .toast { bottom: 40px; margin-left: calc(var(--rail) / 2); }
+
+  /* giriş ve kurulum ekranları ortada */
+  body:has(.login) { padding-left: 0; }
+  .login { align-items: center; justify-content: center; }
+  .login > *:not(.login-glow) { width: 100%; max-width: 460px; }
+  .login-clock { font-size: 80px; }
+  .label-bar, .docs, .labels { margin-left: 0; }
+}
+/* geniş yatay tablet: içerik daha geniş, demirbaş/stok listesi 3 sütun */
+@media (min-width: 1100px) {
+  main { max-width: 1180px; }
+  main.r-demirbas > .list, main.r-sayim > .list { grid-template-columns: repeat(3, 1fr); }
+  main.r-siparis { columns: 3; }
+}
+/* etiket ve belge sayfalarında menü şeridi yok */
+@media (min-width: 760px) {
+  body:has(.label-bar) { padding-left: 0; }
+}
+@media (min-width: 760px) {
+  main.r-siparis > .btn.block { display: flex; }
+  .login .demo-link { margin-top: 28px; }
+  .login { min-height: 100vh; }
+}
+@media (min-width: 1100px) { main.r-home, main.r-ayarlar { max-width: 900px; } }
+.pin-chip { font-family: ui-monospace, Menlo, monospace; font-weight: 800; font-size: 13px; padding: 3px 8px; border-radius: 8px; background: var(--bg); color: var(--muted); letter-spacing: 1px; flex: none; }
+.pin-chip.on { background: var(--accent-soft); color: var(--accent); }
+.pin-toggle .t { color: var(--accent); }
+
+/* ---------- bildirimler */
+.bell { position: relative; width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,.1); color: var(--brand-ink); display: grid; place-items: center; flex: none; }
+.bell svg { width: 20px; height: 20px; }
+.bell .pip { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--brand); }
+.row.notif { align-items: flex-start; }
+.row.notif.new { background: var(--accent-soft); }
+.row.notif .t { white-space: normal; }
+.n-ic { font-size: 20px; width: 28px; text-align: center; flex: none; margin-top: 1px; }
+.n-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; margin-top: 7px; }
+.notif-cta { display: block; width: 100%; text-align: left; margin-bottom: 10px; box-shadow: none; background: var(--warn-soft); }
+.topbar .scan-btn, .topbar .bell, .topbar .avatar { margin-left: -4px; }
