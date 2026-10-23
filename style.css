@@ -605,3 +605,10 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .n-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; margin-top: 7px; }
 .notif-cta { display: block; width: 100%; text-align: left; margin-bottom: 10px; box-shadow: none; background: var(--warn-soft); }
 .topbar .scan-btn, .topbar .bell, .topbar .avatar { margin-left: -4px; }
+
+/* ---------- geliştirici (salt okunur) */
+.role-tag.r-gelistirici { background: #ece3f7; color: #6b3fa0; }
+.ro-pill { background: #b9a3d9; color: #2a1745; }
+.ro-tag { font-size: 10px; font-weight: 800; letter-spacing: .4px; padding: 1px 6px; border-radius: 4px; background: var(--line); color: var(--muted); vertical-align: 2px; margin-left: 4px; }
+.ro-card { margin-bottom: 12px; box-shadow: none; background: #ece3f7; color: #2a1745; }
+#uRole button { font-size: 12.5px; padding: 9px 2px; }

@@ -139,6 +139,20 @@ const Sync = (() => {
             setState({ status: st, msg: err ? errText(err) : '' });
     }
     async function loadBackend(c) {
+        // eski tarayıcılar (iOS 10–11.2): Firebase kütüphanesi çalışmaz → REST bağlantısı (rest-backend.js)
+        if (c.type !== 'mock' && (!window.__canImport || window.__forceRest)) {
+            if (!window.fetch)
+                throw new Error('eski-tarayici');
+            if (!window.KafeRest)
+                await new Promise((ok, fail) => {
+                    const sc = document.createElement('script');
+                    sc.src = new URL('rest-backend.js', document.baseURI).href;
+                    sc.onload = ok;
+                    sc.onerror = () => fail(new Error('network: rest-backend yüklenemedi'));
+                    document.head.appendChild(sc);
+                });
+            return window.KafeRest.create(c);
+        }
         // eski tarayıcılarda "import(...)" yazımı sayfayı tamamen bozar; bu yüzden metin olarak kurulur
         if (!window.__canImport)
             throw new Error('eski-tarayici');

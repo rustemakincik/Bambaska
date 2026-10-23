@@ -20,7 +20,7 @@
   const MV_LABEL = { sayim: 'saydı', giris: 'giriş yaptı', cikis: 'çıkış yaptı' };
   const isAdmin = () => user?.role === 'yonetici';
   // ---- roller ve yetkiler: yönetici her şeyi yapar; müdür/personel için kişi bazında işaretlenir
-  const ROLES = [['yonetici', 'Yönetici'], ['mudur', 'Müdür'], ['personel', 'Personel']];
+  const ROLES = [['yonetici', 'Yönetici'], ['mudur', 'Müdür'], ['personel', 'Personel'], ['gelistirici', 'Geliştirici']];
   const roleName = r => (ROLES.find(x => x[0] === r) || ROLES[2])[1];
   const PERMS = [
     ['Sayım ve sipariş', [
@@ -44,13 +44,19 @@
     ]],
   ];
   const PRESET = {
+    gelistirici: {}, // her şeyi görür, hiçbir şeyi değiştiremez; yönetici isterse açar
     mudur: { sayim_tum: 1, siparis_hazirla: 1, teslim: 1, malzeme: 1, tedarikci: 1, bolum: 1, demirbas_durum: 1, demirbas_yonet: 1 },
     personel: { siparis_hazirla: 1, teslim: 1, demirbas_durum: 1 },
   };
   const permsOf = u => u.perms || PRESET[u.role] || PRESET.personel;
   const can = p => !!user && (user.role === 'yonetici' || !!permsOf(user)[p]);
+  const isDev = () => user?.role === 'gelistirici';
+  const viewAll = () => isAdmin() || isDev();
+  const readOnly = () => isDev() && !Object.keys(permsOf(user)).length;
+  const canCountDept = deptId => isDev() ? can('sayim_tum') : myDepts().some(d => d.id === deptId);
+  const RO_MSG = 'Salt okunur: bu işlem için yetkin kapalı. Yönetici açabilir.';
   const canAnyRecords = () => can('malzeme') || can('tedarikci') || can('bolum');
-  const myDepts = () => (isAdmin() || can('sayim_tum') || !user.deptIds?.length) ? S.get().depts : S.get().depts.filter(d => user.deptIds.includes(d.id));
+  const myDepts = () => (isAdmin() || isDev() || can('sayim_tum') || !user.deptIds?.length) ? S.get().depts : S.get().depts.filter(d => user.deptIds.includes(d.id));
 
   function ago(t) {
     const d = (Date.now() - t) / 1000;
@@ -219,7 +225,7 @@
       <header class="topbar">
         <div class="grow">
           <h1>${r === 'home' || !titles[r] ? brandHTML('bar') : esc(titles[r])}</h1>
-          <div class="sub">${S.isDemo ? '<span class="demo-pill">DEMO</span>' : ''}${syncLabel()}</div>
+          <div class="sub">${S.isDemo ? '<span class="demo-pill">DEMO</span>' : ''}${readOnly() ? '<span class="demo-pill ro-pill">SALT OKUNUR</span>' : ''}${syncLabel()}</div>
         </div>
         ${bellHTML()}
         <button class="scan-btn" data-act="scan" aria-label="Karekod okut"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg></button>
@@ -537,6 +543,12 @@
     if (!ui.sayimDept || !depts.find(d => d.id === ui.sayimDept)) ui.sayimDept = depts[0]?.id;
     const its = db.items.filter(i => i.deptId === ui.sayimDept).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
     const changed = Object.keys(ui.sayimDraft).length;
+    if (isDev() && !can('sayim_tum')) return `
+      <div class="chips">${depts.map(d => `<button class="chip ${ui.sayimDept === d.id ? 'on' : ''}" data-act="sayim-dept" data-id="${d.id}">${d.icon} ${esc(d.name)}</button>`).join('')}</div>
+      <div class="card small ro-card">👁️ <b>Salt okunur.</b> Sayımları görebilirsin; değiştirmek için yöneticinin yetki açması gerekir.</div>
+      <div class="list">${its.map(it => `<div class="row"><div class="main"><div class="t">${esc(it.name)}</div>
+        <div class="s">${it.uncounted ? 'Henüz sayılmadı' : `${esc(it.updatedBy || '')} · ${ago(it.updatedAt)}`}</div></div>
+        <div class="qty"><span class="n">${it.uncounted ? '–' : fmt(it.qty)}</span><span class="u">${esc(it.unit)}</span></div></div>`).join('') || '<div class="empty"><div class="e">📦</div>Bu bölümde malzeme yok</div>'}</div>`;
     return `
       <div class="chips">${depts.map(d => `<button class="chip ${ui.sayimDept === d.id ? 'on' : ''}" data-act="sayim-dept" data-id="${d.id}">${d.icon} ${esc(d.name)}</button>`).join('')}</div>
       <div class="card small" style="margin-bottom:12px;display:flex;gap:10px;align-items:center">
@@ -603,7 +615,7 @@
     return m.size > 1 ? [...m].map(([n, q]) => `${n} ${fmt(q)}`).join(' · ') : [...m.keys()][0];
   };
   const LOG_TXT = { ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı' };
-  const visibleOrders = () => S.get().orders.filter(o => can('siparis_onay') || can('siparis_direkt') || isMine(o)
+  const visibleOrders = () => S.get().orders.filter(o => viewAll() || can('siparis_onay') || can('siparis_direkt') || isMine(o)
     || (can('teslim') && ['verildi', 'teslim'].includes(o.status)));
   const myNeeds = () => {
     const ds = myDepts().map(d => d.id);
@@ -992,7 +1004,7 @@
       <h3>Karekod okut</h3><div class="sub">Kamerayı demirbaş etiketine tut</div>
       <div class="scan-box"><video id="scanV" playsinline muted></video><div class="scan-frame"></div>
         <div class="scan-msg" id="scanMsg">Kamera açılıyor…</div></div>
-      <div class="manual"><input id="manualCode" placeholder="veya kodu yaz: DB-0003" autocapitalize="characters"><button class="btn primary" id="manualGo">Aç</button></div>`,
+      <div class="manual"><input id="manualCode" placeholder="DB-0003 ya da katılım bağlantısı" autocapitalize="characters"><button class="btn primary" id="manualGo">Aç</button></div>`,
       async sh => {
         const msg = sh.querySelector('#scanMsg'), v = sh.querySelector('#scanV');
         const go = () => { const c = sh.querySelector('#manualCode').value.trim(); if (!c) return; found(/^\d+$/.test(c) ? 'DB-' + c.padStart(4, '0') : c); };
@@ -1225,7 +1237,8 @@
       btn.disabled = false; btn.textContent = 'Tekrar dene';
       const m = String(e.code || e.message || e);
       msg.textContent = '⚠️ ' + (/eski-tarayici/.test(m) ? 'Bu cihaz çok eski: bulut bağlantısı için iOS 11.3 veya üstü gerekiyor. Uygulama bu cihazda sadece demo olarak açılır.'
-        : 'Katılamadı: ' + (/permission/i.test(m) ? 'kod geçersiz ya da kafe silinmiş' : m));
+        : 'Katılamadı: ' + (/permission/i.test(m) ? 'kod geçersiz ya da kafe silinmiş'
+          : /Failed to fetch|NetworkError|Load failed|network/i.test(m) ? 'internete bağlanılamadı. Bağlantıyı kontrol edip tekrar dene.' : m));
     }
   }
 
@@ -1243,16 +1256,16 @@
     db.orders.forEach(o => (o.log || []).forEach((l, i) => {
       if (!l.at || l.at < since || l.user === me) return;
       const id = `o:${o.id}:${i}`;
-      if (['onaya_gonderdi', 'ekledi'].includes(l.action) && can('siparis_onay') && o.status === 'onay')
+      if (['onaya_gonderdi', 'ekledi'].includes(l.action) && (can('siparis_onay') || isDev()) && o.status === 'onay')
         out.push({ id, at: l.at, icon: '⏳', title: `${l.user} onaya sipariş gönderdi`, body: `${o.no} · ${supName(o)}`, hash: '#/siparis', tab: 'onay' });
       else if (l.action === 'onayladi' && isMine(o))
         out.push({ id, at: l.at, icon: '✅', title: `${o.no} onaylandı`, body: `${supName(o)}${o.adminNote ? ' · ' + o.adminNote : ''}`, hash: '#/siparis', tab: 'yolda' });
       else if (l.action === 'reddetti' && isMine(o))
         out.push({ id, at: l.at, icon: '✖️', title: `${o.no} reddedildi`, body: o.adminNote || supName(o), hash: '#/siparis', tab: 'gecmis' });
-      else if (l.action === 'teslim_aldi' && (isMine(o) || can('siparis_onay')))
+      else if (l.action === 'teslim_aldi' && (isMine(o) || can('siparis_onay') || isDev()))
         out.push({ id, at: l.at, icon: '📦', title: `${o.no} teslim alındı`, body: `${supName(o)} · ${l.user}`, hash: '#/siparis', tab: 'gecmis' });
     }));
-    if (isAdmin() || can('demirbas_yonet') || can('demirbas_durum')) db.assetLog.forEach(l => {
+    if (viewAll() || can('demirbas_yonet') || can('demirbas_durum')) db.assetLog.forEach(l => {
       if (!l.at || l.at < since || l.user === me || !l.from) return;
       const a = db.assets.find(x => x.id === l.assetId); if (!a) return;
       if (['arizali', 'kayip'].includes(l.to))
@@ -1260,7 +1273,7 @@
       else if (l.to === 'aktif' && ['arizali', 'tamirde', 'kayip'].includes(l.from))
         out.push({ id: `a:${l.id}`, at: l.at, icon: '🔧', title: `${a.name} tekrar aktif`, body: `${a.code} · ${l.user}${l.note ? ' · ' + l.note : ''}`, hash: '#/demirbas', asset: a.id });
     });
-    if (can('siparis_hazirla') || can('siparis_direkt')) {
+    if (can('siparis_hazirla') || can('siparis_direkt') || isDev()) {
       const ds = new Set(myDepts().map(d => d.id));
       db.movements.forEach(m => {
         if (!m.at || m.at < since || m.user === me) return;
@@ -1349,7 +1362,7 @@
       <div class="skins">${SKINS.map(t => `<button class="skin ${cur === t.id ? 'on' : ''}" data-act="skin" data-id="${t.id}">
         <span class="sw"><i style="background:${t.c[0]}"></i><i style="background:${t.c[1]}"></i><i style="background:${t.c[2]}"></i></span>
         <b>${t.name}</b>${t.d ? `<small>${t.d}</small>` : ''}</button>`).join('')}</div>`;
-    const sec = (title, act, rows) => `<h2 class="section">${title}</h2><div class="list">${rows}<button class="row" data-act="${act}" style="color:var(--accent);font-weight:700">+ Ekle</button></div>`;
+    const sec = (title, act, rows, ok = true) => `<h2 class="section">${title}${ok ? '' : ' <span class="ro-tag">salt okunur</span>'}</h2><div class="list">${ok ? rows : rows.replace(/data-act="(edit-[a-z]+|manage-items|tpl-import)"/g, 'data-act="ro"')}${ok ? `<button class="row" data-act="${act}" style="color:var(--accent);font-weight:700">+ Ekle</button>` : ''}</div>`;
     let out = profile + cloudSection() + notifySection();
     if (isAdmin()) out += `
       <h2 class="section">Kafe</h2>
@@ -1357,12 +1370,13 @@
         <div class="cafe-thumb">${db.cafe.logo ? `<img src="${db.cafe.logo}" alt="">` : '☕'}</div>
         <div class="main"><div class="t">${esc(db.cafe.name)}</div><div class="s">Logo ve isim · ${CAFE_MODES.find(x => x[0] === cafeMode())[1]}</div></div><span class="muted">›</span></button></div>
       ${sec('Kullanıcılar ve yetkiler', 'new-user', `<button class="row pin-toggle" data-act="show-pins"><span style="font-size:18px">${ui.showPins ? '🙈' : '👁️'}</span><div class="main"><div class="t">${ui.showPins ? "PIN'leri gizle" : "PIN'leri göster"}</div><div class="s">Sadece yönetici görebilir</div></div></button>` + db.users.map(u => `<button class="row" data-act="edit-user" data-id="${u.id}"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)} <span class="role-tag r-${u.role}">${roleName(u.role)}</span></div><div class="s">${u.role === 'yonetici' ? 'Tüm yetkiler' : esc(permSummary(u))}</div></div><span class="pin-chip ${ui.showPins ? 'on' : ''}">${ui.showPins ? esc(u.pin) : '••••'}</span><span class="muted">›</span></button>`).join(''))}`;
-    if (can('malzeme')) out += sec('Malzemeler', 'new-item', `<button class="row" data-act="tpl-import" style="color:var(--accent);font-weight:700">📋 Örnek listeden ekle</button>` + db.depts.map(d => {
+    if (can('malzeme') || isDev()) out += sec('Malzemeler', 'new-item', `<button class="row" data-act="tpl-import" style="color:var(--accent);font-weight:700">📋 Örnek listeden ekle</button>` + db.depts.map(d => {
       const n = db.items.filter(i => i.deptId === d.id).length;
       return `<button class="row" data-act="manage-items" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div><div class="s">${n} malzeme</div></div><span class="muted">›</span></button>`;
-    }).join(''));
-    if (can('tedarikci')) out += sec('Tedarikçiler', 'new-sup', db.suppliers.map(s => `<button class="row" data-act="edit-sup" data-id="${s.id}"><div class="main"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.contact || '')} ${s.phone ? '· +' + esc(s.phone) : ''}</div></div><span class="muted">›</span></button>`).join(''));
-    if (can('bolum')) out += sec('Bölümler', 'new-dept', db.depts.map(d => `<button class="row" data-act="edit-dept" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div></div><span class="muted">›</span></button>`).join(''));
+    }).join(''), can('malzeme'));
+    if (can('tedarikci') || isDev()) out += sec('Tedarikçiler', 'new-sup', db.suppliers.map(s => `<button class="row" data-act="edit-sup" data-id="${s.id}"><div class="main"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.contact || '')} ${s.phone ? '· +' + esc(s.phone) : ''}</div></div><span class="muted">›</span></button>`).join(''), can('tedarikci'));
+    if (can('bolum') || isDev()) out += sec('Bölümler', 'new-dept', db.depts.map(d => `<button class="row" data-act="edit-dept" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div></div><span class="muted">›</span></button>`).join(''), can('bolum'));
+    if (isDev()) out += sec('Kullanıcılar', 'new-user', db.users.map(u => `<div class="row"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)} <span class="role-tag r-${u.role}">${roleName(u.role)}</span></div><div class="s">${u.role === 'yonetici' ? 'Tüm yetkiler' : esc(permSummary(u))}</div></div></div>`).join(''), false);
     out += themes;
     if (!S.isDemo) out += `<h2 class="section">Demo</h2><div class="list"><button class="row" data-act="go-demo"><span style="font-size:20px">🧪</span><div class="main"><div class="t">Demo'yu aç</div><div class="s">Örnek verilerle dene · PIN 0000 · gerçek kafeye karışmaz</div></div><span class="muted">›</span></button></div>`;
     if (isAdmin()) out += `
@@ -1371,7 +1385,7 @@
         <div>Tüm verileri (malzeme, sipariş, demirbaş, geçmiş) tek dosya olarak telefona indirir.</div>
         <div class="btn-row"><button class="btn sm" data-act="export">Yedek indir</button>${S.isDemo ? '' : `<button class="btn danger sm" data-act="reset-cafe">Kafeyi sıfırla</button>`}</div>
       </div>`;
-    if (!isAdmin() && !canAnyRecords()) out += `<div class="empty small">Malzeme, tedarikçi ve kullanıcı ayarlarını yetkili kişiler değiştirebilir.</div>`;
+    if (!isAdmin() && !isDev() && !canAnyRecords()) out += `<div class="empty small">Malzeme, tedarikçi ve kullanıcı ayarlarını yetkili kişiler değiştirebilir.</div>`;
     return out;
   }
   function permSummary(u) {
@@ -1428,7 +1442,7 @@
     const it = S.item(id); if (!it) return;
     const st = S.status(it), dept = S.dept(it.deptId), sup = S.supplier(it.supplierId);
     const hist = S.get().movements.filter(m => m.itemId === id).slice(0, 5);
-    const canCount = myDepts().some(d => d.id === it.deptId);
+    const canCount = canCountDept(it.deptId);
     const onay = S.pendingQtyFor(id, ['onay']), yol = S.pendingQtyFor(id, ['verildi']);
     const open = S.get().orders.filter(o => ['onay', 'verildi'].includes(o.status) && o.lines.some(l => l.itemId === id));
     const canOrder = (can('siparis_hazirla') || can('siparis_direkt')) && sup;
@@ -1449,7 +1463,7 @@
       <h2 class="section">Sayım</h2>
       ${canCount ? `
       <div class="big-stepper"><button data-s="-1">−</button><div><input id="bigQ" inputmode="decimal" value="${fmt(v)}"><div class="u">${esc(it.unit)} · elde</div></div><button data-s="1">+</button></div>
-      <button class="btn primary block" id="saveItem">Sayımı kaydet</button>` : `<div class="card small muted">Bu bölümün sayımını sadece ilgili personel yapabilir.</div>`}
+      <button class="btn primary block" id="saveItem">Sayımı kaydet</button>` : `<div class="card small muted">${isDev() ? '👁️ Salt okunur: sayım yetkin kapalı.' : 'Bu bölümün sayımını sadece ilgili personel yapabilir.'}</div>`}
 
       <h2 class="section">Sipariş</h2>
       ${open.length ? `<div class="list" style="margin-bottom:10px">${open.map(o => {
@@ -1588,7 +1602,8 @@
         const draw = () => {
           sh.querySelectorAll('#uRole [data-r]').forEach(b => { b.classList.toggle('on', b.dataset.r === role); b.disabled = lastAdmin && b.dataset.r !== 'yonetici'; });
           sh.querySelector('#uRoleHint').textContent = role === 'yonetici' ? 'Yönetici her şeyi yapabilir: onaylar, kullanıcılar, kafe ve bulut ayarları.'
-            : lastAdmin ? '' : role === 'mudur' ? 'Müdür için önerilen yetkiler işaretlendi; istediğini değiştir.' : 'Personel için önerilen yetkiler işaretlendi; istediğini değiştir.';
+            : lastAdmin ? '' : role === 'gelistirici' ? 'Geliştirici her şeyi görür ama varsayılan olarak hiçbir şeyi değiştiremez. Açmak istediğin yetkileri işaretle.'
+            : role === 'mudur' ? 'Müdür için önerilen yetkiler işaretlendi; istediğini değiştir.' : 'Personel için önerilen yetkiler işaretlendi; istediğini değiştir.';
           if (lastAdmin) sh.querySelector('#uRoleHint').textContent = 'Tek yönetici bu kişi; rolü değiştirilemez.';
           sh.querySelector('#uPermBox').innerHTML = role === 'yonetici' ? '' : PERMS.map(([g, list]) => `
             <div class="perm-group"><div class="pg-title">${g}</div>${list.map(([k, l, d]) => `
@@ -1663,6 +1678,7 @@
       'demo-pins': () => { showDemo = !showDemo; renderLogin(); },
       'go-demo': () => S.setMode('demo'),
       'my-pin': () => openMyPin(),
+      ro: () => toast(RO_MSG),
       notif: () => openNotifs(),
       'notif-on': () => enableNotify(),
       'notif-off': () => { try { localStorage.setItem('kafestok.notify', '0'); } catch (e) {} render(); toast('Telefon bildirimleri kapatıldı'); },

@@ -45,18 +45,33 @@ export async function create(cloud) {
         },
         subscribe(colls, onChanges, onStatus) {
             const unsubs = colls.map(c => F.onSnapshot(F.collection(db, 'cafes', cloud.cafeId, c), { includeMetadataChanges: true }, snap => {
-                const changes = snap.docChanges().map(d => ({ id: d.doc.id, data: d.type === 'removed' ? null : d.doc.data() }));
+                // _t (sunucu zamanı) sadece eski cihazların değişiklik takibi içindir; uygulamaya verilmez
+                const changes = snap.docChanges().map(d => {
+                    if (d.type === 'removed')
+                        return { id: d.doc.id, data: null };
+                    const data = d.doc.data();
+                    delete data._t;
+                    return { id: d.doc.id, data };
+                });
                 onChanges(c, changes, { ids: snap.docs.map(d => d.id), fromCache: snap.metadata.fromCache });
             }, err => onStatus('error', err)));
             return () => unsubs.forEach(u => u());
         },
+        // Her kayda _t (sunucu zamanı) eklenir; silinenler için 'deleted' izi bırakılır; sys/rev sayacı artar.
+        // Böylece eski cihazlar (REST ile) sadece değişenleri okuyabilir.
         async write(ops) {
-            for (let i = 0; i < ops.length; i += 400) {
+            for (let i = 0; i < ops.length; i += 150) {
                 const b = F.writeBatch(db);
-                ops.slice(i, i + 400).forEach(o => {
+                ops.slice(i, i + 150).forEach(o => {
                     const r = F.doc(db, 'cafes', cloud.cafeId, o.coll, o.id);
-                    o.data ? b.set(r, o.data) : b.delete(r);
+                    if (o.data)
+                        b.set(r, Object.assign({}, o.data, { _t: F.serverTimestamp() }));
+                    else {
+                        b.delete(r);
+                        b.set(F.doc(db, 'cafes', cloud.cafeId, 'deleted', o.coll + '__' + o.id), { coll: o.coll, id: o.id, _t: F.serverTimestamp() });
+                    }
                 });
+                b.set(F.doc(db, 'cafes', cloud.cafeId, 'sys', 'rev'), { n: F.increment(1), t: F.serverTimestamp() }, { merge: true });
                 await b.commit();
             }
         },
