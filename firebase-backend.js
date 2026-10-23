@@ -5,64 +5,60 @@
 // Güvenlik firestore.rules dosyasında: sadece üye cihazlar okuyup yazabilir.
 const V = '12.19.0';
 const B = `https://www.gstatic.com/firebasejs/${V}/`;
-
 let mods = null;
 async function sdk() {
-  if (!mods) {
-    const [app, auth, fs] = await Promise.all([import(B + 'firebase-app.js'), import(B + 'firebase-auth.js'), import(B + 'firebase-firestore.js')]);
-    mods = { app, auth, fs };
-  }
-  return mods;
+    if (!mods) {
+        const [app, auth, fs] = await Promise.all([import(B + 'firebase-app.js'), import(B + 'firebase-auth.js'), import(B + 'firebase-firestore.js')]);
+        mods = { app, auth, fs };
+    }
+    return mods;
 }
-
 export async function create(cloud) {
-  const { app: A, auth: Au, fs: F } = await sdk();
-  const name = 'kafestok-' + cloud.config.projectId;
-  const app = A.getApps().find(a => a.name === name) || A.initializeApp(cloud.config, name);
-  let db;
-  try {
-    // çevrimdışı önbellek: internet yokken okur/yazar, gelince gönderir
-    db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) });
-  } catch (e) { db = F.getFirestore(app); }
-  const auth = Au.getAuth(app);
-  if (!auth.currentUser) {
-    await new Promise(res => { const u = Au.onAuthStateChanged(auth, () => { u(); res(); }); });
-    if (!auth.currentUser) await Au.signInAnonymously(auth);
-  }
-  const uid = auth.currentUser.uid;
-  const cafeRef = () => F.doc(db, 'cafes', cloud.cafeId);
-  const memberRef = () => F.doc(db, 'cafes', cloud.cafeId, 'members', uid);
-
-  return {
-    uid,
-    async createCafe() {
-      await F.setDoc(cafeRef(), { joinCode: cloud.joinCode, createdAt: Date.now(), createdBy: uid });
-      await this.join();
-    },
-    async join() {
-      await F.setDoc(memberRef(), { code: cloud.joinCode, joinedAt: Date.now(), device: navigator.userAgent.slice(0, 120) });
-    },
-    subscribe(colls, onChanges, onStatus) {
-      const unsubs = colls.map(c => F.onSnapshot(
-        F.collection(db, 'cafes', cloud.cafeId, c),
-        { includeMetadataChanges: true },
-        snap => {
-          const changes = snap.docChanges().map(d => ({ id: d.doc.id, data: d.type === 'removed' ? null : d.doc.data() }));
-          onChanges(c, changes, { ids: snap.docs.map(d => d.id), fromCache: snap.metadata.fromCache });
+    const { app: A, auth: Au, fs: F } = await sdk();
+    const name = 'kafestok-' + cloud.config.projectId;
+    const app = A.getApps().find(a => a.name === name) || A.initializeApp(cloud.config, name);
+    let db;
+    try {
+        // çevrimdışı önbellek: internet yokken okur/yazar, gelince gönderir
+        db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) });
+    }
+    catch (e) {
+        db = F.getFirestore(app);
+    }
+    const auth = Au.getAuth(app);
+    if (!auth.currentUser) {
+        await new Promise(res => { const u = Au.onAuthStateChanged(auth, () => { u(); res(); }); });
+        if (!auth.currentUser)
+            await Au.signInAnonymously(auth);
+    }
+    const uid = auth.currentUser.uid;
+    const cafeRef = () => F.doc(db, 'cafes', cloud.cafeId);
+    const memberRef = () => F.doc(db, 'cafes', cloud.cafeId, 'members', uid);
+    return {
+        uid,
+        async createCafe() {
+            await F.setDoc(cafeRef(), { joinCode: cloud.joinCode, createdAt: Date.now(), createdBy: uid });
+            await this.join();
         },
-        err => onStatus('error', err)
-      ));
-      return () => unsubs.forEach(u => u());
-    },
-    async write(ops) {
-      for (let i = 0; i < ops.length; i += 400) {
-        const b = F.writeBatch(db);
-        ops.slice(i, i + 400).forEach(o => {
-          const r = F.doc(db, 'cafes', cloud.cafeId, o.coll, o.id);
-          o.data ? b.set(r, o.data) : b.delete(r);
-        });
-        await b.commit();
-      }
-    },
-  };
+        async join() {
+            await F.setDoc(memberRef(), { code: cloud.joinCode, joinedAt: Date.now(), device: navigator.userAgent.slice(0, 120) });
+        },
+        subscribe(colls, onChanges, onStatus) {
+            const unsubs = colls.map(c => F.onSnapshot(F.collection(db, 'cafes', cloud.cafeId, c), { includeMetadataChanges: true }, snap => {
+                const changes = snap.docChanges().map(d => ({ id: d.doc.id, data: d.type === 'removed' ? null : d.doc.data() }));
+                onChanges(c, changes, { ids: snap.docs.map(d => d.id), fromCache: snap.metadata.fromCache });
+            }, err => onStatus('error', err)));
+            return () => unsubs.forEach(u => u());
+        },
+        async write(ops) {
+            for (let i = 0; i < ops.length; i += 400) {
+                const b = F.writeBatch(db);
+                ops.slice(i, i + 400).forEach(o => {
+                    const r = F.doc(db, 'cafes', cloud.cafeId, o.coll, o.id);
+                    o.data ? b.set(r, o.data) : b.delete(r);
+                });
+                await b.commit();
+            }
+        },
+    };
 }

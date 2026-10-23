@@ -455,9 +455,9 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 /* ---------- çok parçalı ilerleme çubuğu: elde + siparişte */
 .bar { display: flex; }
 .bar > span { flex: none; }
-.seg-yol { background: repeating-linear-gradient(-45deg, var(--ok) 0 3px, color-mix(in srgb, var(--ok) 40%, transparent) 3px 6px); }
-.seg-onay { background: repeating-linear-gradient(-45deg, var(--warn) 0 3px, color-mix(in srgb, var(--warn) 35%, transparent) 3px 6px); }
-.seg-draft { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent); border-radius: 3px; }
+.seg-yol { background: repeating-linear-gradient(-45deg, #3f8f5a 0 3px, rgba(63,143,90,.4) 3px 6px); background: repeating-linear-gradient(-45deg, var(--ok) 0 3px, color-mix(in srgb, var(--ok) 40%, transparent) 3px 6px); }
+.seg-onay { background: repeating-linear-gradient(-45deg, #c98a12 0 3px, rgba(201,138,18,.35) 3px 6px); background: repeating-linear-gradient(-45deg, var(--warn) 0 3px, color-mix(in srgb, var(--warn) 35%, transparent) 3px 6px); }
+.seg-draft { background: rgba(194,102,45,.12); background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent); border-radius: 3px; }
 .bar > span + span { border-radius: 0 3px 3px 0; }
 .bar-big { height: 16px; border-radius: 8px; overflow: visible; background: var(--line); }
 .bar-big > span:first-child { border-radius: 8px 0 0 8px; }
@@ -483,7 +483,7 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .ln-btn.has { filter: none; opacity: 1; background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .ln-in { padding: 0 14px 10px 46px; }
 .ln-in .note-in { margin: 0; }
-.o-note.sup { background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
+.o-note.sup { background: rgba(63,143,90,.12); background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
 .o-note.sup span { color: var(--ok); }
 .fhint { font-style: normal; font-weight: 500; color: var(--muted); font-size: 11.5px; margin-left: 4px; }
 
@@ -528,7 +528,8 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
    ========================================================= */
 @media (min-width: 760px) {
   :root { --rail: 92px; }
-  body { padding-bottom: 24px; padding-left: var(--rail); }
+  body { padding-bottom: 24px; }
+  body.rail { padding-left: var(--rail); }
   .nav { top: 0; bottom: 0; left: 0; right: auto; width: var(--rail); height: auto; flex-direction: column; justify-content: flex-start;
     padding: calc(env(safe-area-inset-top) + 92px) 0 env(safe-area-inset-bottom); border-top: 0; border-right: 1px solid var(--line); gap: 6px; }
   .nav a { flex: none; height: 74px; font-size: 12px; margin: 0 10px; border-radius: 16px; }
@@ -569,7 +570,6 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
   .toast { bottom: 40px; margin-left: calc(var(--rail) / 2); }
 
   /* giriş ve kurulum ekranları ortada */
-  body:has(.login) { padding-left: 0; }
   .login { align-items: center; justify-content: center; }
   .login > *:not(.login-glow) { width: 100%; max-width: 460px; }
   .login-clock { font-size: 80px; }
@@ -583,7 +583,6 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 }
 /* etiket ve belge sayfalarında menü şeridi yok */
 @media (min-width: 760px) {
-  body:has(.label-bar) { padding-left: 0; }
 }
 @media (min-width: 760px) {
   main.r-siparis > .btn.block { display: flex; }
