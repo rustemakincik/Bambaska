@@ -1471,19 +1471,40 @@
         });
     }
     function openAddDevice() {
-        const link = Sync.joinLink();
-        sheet(`
-      <h3>Cihaz ekle</h3><div class="sub">Garsonun ya da nargilecinin telefonunda kamerayı aç, bu karekodu okut. Açılan sayfada <b>“Katıl”</b> desin, sonra kendi adını ve PIN'ini seçsin.</div>
-      <div class="qr-big join-qr">${makeQR(link)}</div>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn" id="cpLink">Bağlantıyı kopyala</button>
-        ${navigator.share ? `<button class="btn wa" id="shLink">Paylaş</button>` : ''}
-      </div>
-      <div class="card small" style="margin-top:12px;box-shadow:none;background:var(--warn-soft)">🔐 Bu karekod/bağlantı kafenin anahtarıdır. Sadece çalışanlarla paylaş; sosyal medyaya koyma.</div>
-      <div class="small muted" style="margin-top:10px">iPhone'da: bağlantı Safari'de açılınca <b>Paylaş → Ana Ekrana Ekle</b> ile uygulama gibi kurulur.</div>`, sh => {
+        const link = Sync.joinLink(), cafe = S.get().cafe.name;
+        let mode = 'web';
+        const webMsg = () => `${cafe} uygulamasına katılmak için bu bağlantıyı aç:\n${link}\n\niPhone'da Safari'de açınca Paylaş → Ana Ekrana Ekle ile uygulama gibi kurulur.`;
+        const apkMsg = () => `${cafe} Android uygulaması:\n\n1) Uygulamayı indir ve kur:\n${APK_URL}\n(“Bilinmeyen kaynaklara izin ver” sorulursa izin ver)\n\n2) Kurduktan sonra bu katılım bağlantısına dokun, açılan sayfada “Uygulamada aç” de:\n${link}`;
+        const draw = sh => {
             var _a;
-            sh.querySelector('#cpLink').onclick = () => { var _a; return (_a = navigator.clipboard) === null || _a === void 0 ? void 0 : _a.writeText(link).then(() => toast('Bağlantı kopyalandı'), () => toast('Kopyalanamadı')); };
-            (_a = sh.querySelector('#shLink')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => navigator.share({ title: S.get().cafe.name, text: `${S.get().cafe.name} uygulamasına katılmak için aç:`, url: link }).catch(() => { }));
+            sh.querySelectorAll('[data-dm]').forEach(b => b.classList.toggle('on', b.dataset.dm === mode));
+            sh.querySelector('#dvBody').innerHTML = mode === 'web' ? `
+        <div class="sub" style="margin-top:4px">Garsonun ya da nargilecinin telefonunda kamerayı aç, bu karekodu okut. Açılan sayfada <b>“Katıl”</b> desin, sonra kendi adını ve PIN'ini seçsin. <b>iPhone ve Android</b>'de çalışır.</div>
+        <div class="qr-big join-qr">${makeQR(link)}</div>
+        <div class="small muted" style="margin-top:8px">iPhone'da: bağlantı Safari'de açılınca <b>Paylaş → Ana Ekrana Ekle</b> ile uygulama gibi kurulur.</div>`
+                : `
+        <div class="sub" style="margin-top:4px">Sadece <b>Android</b>. Uygulama kurulur, içerik her açılışta siteden güncel gelir; ayrıca güncellemeye gerek yok.</div>
+        <div class="apk-steps">
+          <div><b>1</b><span>Bu karekodu okut, <b>bambaska.apk</b> inip kurulsun. “Bilinmeyen kaynaklara izin ver” sorulursa izin ver.</span></div>
+          <div class="qr-big join-qr">${makeQR(APK_URL)}</div>
+          <div><b>2</b><span>Uygulamayı aç → <b>Kurulu kafeye bağlan</b> de ve <a href="#" id="dvShowJoin">katılım karekodunu</a> okut. Mesajla gönderirsen katılım bağlantısına dokununca <b>“Uygulamada aç”</b> çıkar.</span></div>
+        </div>`;
+            (_a = sh.querySelector('#dvShowJoin')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', e => { e.preventDefault(); mode = 'web'; draw(sh); });
+            sh.querySelector('#shLink').textContent = mode === 'web' ? 'Bağlantıyı paylaş' : 'APK + bağlantıyı paylaş';
+        };
+        sheet(`
+      <h3>Cihaz ekle</h3>
+      <div class="seg" style="margin:6px 0 4px"><button data-dm="web">🌐 Web bağlantısı</button><button data-dm="apk">🤖 Android uygulaması (APK)</button></div>
+      <div id="dvBody"></div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn" id="cpLink">Kopyala</button>
+        <button class="btn wa" id="shLink"></button>
+      </div>
+      <div class="card small" style="margin-top:12px;box-shadow:none;background:var(--warn-soft)">🔐 Katılım bağlantısı kafenin anahtarıdır. Sadece çalışanlarla paylaş; sosyal medyaya koyma.</div>`, sh => {
+            draw(sh);
+            sh.querySelectorAll('[data-dm]').forEach(b => b.onclick = () => { mode = b.dataset.dm; draw(sh); });
+            sh.querySelector('#cpLink').onclick = () => copyText(mode === 'web' ? link : apkMsg());
+            sh.querySelector('#shLink').onclick = () => shareText(cafe, mode === 'web' ? webMsg() : apkMsg());
         });
     }
     // #/katil/<kod> : başka telefondan gelen katılım bağlantısı (giriş yapmadan da açılır)
@@ -1508,6 +1529,8 @@
               <p>${Sync.cloud ? '⚠️ Bu telefon başka bir kafeye bağlı; o bağlantı kapanacak.' : 'Bu telefondaki deneme verileri silinip yerine kafenin gerçek verileri gelecek.'}</p>
               <div class="join-msg" id="joinMsg"></div>
               <button class="btn primary block big-btn" data-act="join-go">Katıl</button>
+              ${isAndroid() && !inApk() ? `<a class="btn block" style="margin-top:8px" href="intent://katil/${esc(routeArg())}#Intent;scheme=bambaska;package=com.bambaska.kafe;S.browser_fallback_url=${encodeURIComponent(APK_URL)};end">🤖 Android uygulamasında aç</a>
+                <div class="small" style="opacity:.75;margin-top:4px;text-align:center">Uygulama kurulu değilse indirme başlar</div>` : ''}
               <button class="btn ghost block" data-act="join-cancel" style="margin-top:6px;color:inherit">Vazgeç</button>
             </div>`}
       </div>`;
@@ -1675,13 +1698,44 @@
         }
         catch (x) { } });
     }
+    // Android uygulaması (APK) içinde mi? (MainActivity "BambaskaApp" köprüsünü ekler)
+    const inApk = () => !!window.BambaskaApp;
+    const isAndroid = () => /android/i.test(navigator.userAgent);
+    const APK_URL = 'https://github.com/rustemakincik/Bambaska/releases/latest/download/bambaska.apk';
+    function shareText(title, text) {
+        if (inApk())
+            return window.BambaskaApp.share(title, text);
+        if (navigator.share)
+            return navigator.share({ title, text }).catch(() => { });
+        copyText(text);
+    }
+    function copyText(t) {
+        if (inApk()) {
+            window.BambaskaApp.copy(t);
+            return toast('Kopyalandı');
+        }
+        (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Kopyalandı'), () => {
+            const ta = document.createElement('textarea');
+            ta.value = t;
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                toast('Kopyalandı');
+            }
+            catch (e) {
+                toast('Kopyalanamadı');
+            }
+            ta.remove();
+        });
+    }
     const isStandalone = () => { var _a; return ((_a = window.matchMedia) === null || _a === void 0 ? void 0 : _a.call(window, '(display-mode: standalone)').matches) || navigator.standalone === true; };
     const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     function notifySection() {
         const sup = 'Notification' in window, perm = sup ? Notification.permission : 'yok', on = notifyOn() && perm === 'granted';
         let state;
         if (!sup)
-            state = isIOS() && !isStandalone() ? 'iPhone/iPad’de bildirim için uygulamayı <b>Paylaş → Ana Ekrana Ekle</b> ile kurup <b>ana ekrandaki simgeden</b> aç.' : 'Bu tarayıcı telefon bildirimini desteklemiyor.';
+            state = inApk() ? 'Android uygulamasında bildirimler uygulama içindeki 🔔 listesinde görünür.' : isIOS() && !isStandalone() ? 'iPhone/iPad’de bildirim için uygulamayı <b>Paylaş → Ana Ekrana Ekle</b> ile kurup <b>ana ekrandaki simgeden</b> aç.' : 'Bu tarayıcı telefon bildirimini desteklemiyor.';
         else if (perm === 'denied')
             state = 'Bildirim izni kapalı. Telefon ayarlarından bu uygulamaya bildirim izni ver.';
         else
@@ -2451,5 +2505,5 @@
     render();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http'))
         navigator.serviceWorker.register('sw.js').catch(() => { });
-    window.__app = { ui, openItem, receiveSheet, editItem, editUser, events, found, codeFromText, setUser: id => { user = S.user(id); render(); } }; // test için
+    window.__app = { ui, openItem, receiveSheet, editItem, editUser, events, openAddDevice, found, codeFromText, setUser: id => { user = S.user(id); render(); } }; // test için
 })();

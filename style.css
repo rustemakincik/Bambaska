@@ -657,3 +657,6 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .seg5 .seg-n { min-width: 16px; padding: 0 4px; font-size: 10.5px; line-height: 16px; }
 @media (max-width: 380px) { .seg5 button { font-size: 11.5px; } }
 a.btn { text-decoration: none; }
+.apk-steps > div:not(.qr-big) { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; margin-top: 10px; }
+.apk-steps > div:not(.qr-big) > b { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.nfg .apk-steps > div:not(.qr-big) > b { margin-right: 10px; }
