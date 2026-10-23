@@ -23,6 +23,7 @@ const Sync = (() => {
   const ALL = () => [...COLLS(), 'meta'];
   function setState(p) { Object.assign(state, p); listeners.forEach(f => f(state)); }
   function computeStatus() {
+    if (Store.isDemo) return setState({ status: 'demo' });
     if (!cloud) return setState({ status: 'local' });
     if (state.status === 'error' || state.status === 'connecting') return;
     if (!navigator.onLine) return setState({ status: 'offline' });
@@ -46,7 +47,7 @@ const Sync = (() => {
   }
 
   function push() {
-    if (!backend || applying) return;
+    if (!backend || applying || Store.isDemo) return;
     const { ops, cur } = diff(Store.get());
     if (!ops.length) return;
     const prev = ops.map(o => [o.coll, o.id, shadow[o.coll]?.[o.id]]);
@@ -106,6 +107,7 @@ const Sync = (() => {
   }
 
   async function start() {
+    if (Store.isDemo) { setState({ status: 'demo' }); return; } // demo asla buluta bağlanmaz
     if (!cloud) { computeStatus(); return; }
     setState({ status: 'connecting', msg: '' });
     try {

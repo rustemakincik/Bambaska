@@ -2,6 +2,7 @@
 (() => {
   const $app = document.getElementById('app');
   const S = Store;
+  const UKEY = S.isDemo ? 'kafestok.demo.user' : 'kafestok.user', LKEY = S.isDemo ? 'kafestok.demo.lastUser' : 'kafestok.lastUser';
   const ui = {
     stokDept: 'all', stokQ: '', onlyCrit: false,
     sayimDept: null, sayimDraft: {},
@@ -15,7 +16,7 @@
   const num = v => { const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? 0 : n; };
   const stepOf = it => (['kg', 'lt'].includes(it.unit) ? 0.5 : 1);
   const initials = n => (n || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toLocaleUpperCase('tr');
-  const ST_LABEL = { bitti: 'Bitti', kritik: 'Kritik', azaliyor: 'Azalıyor', iyi: 'Yeterli' };
+  const ST_LABEL = { yeni: 'Sayılmadı', bitti: 'Bitti', kritik: 'Kritik', azaliyor: 'Azalıyor', iyi: 'Yeterli' };
   const MV_LABEL = { sayim: 'saydı', giris: 'giriş yaptı', cikis: 'çıkış yaptı' };
   const isAdmin = () => user?.role === 'yonetici';
   // ---- roller ve yetkiler: yönetici her şeyi yapar; müdür/personel için kişi bazında işaretlenir
@@ -201,7 +202,7 @@
   let pendingDeep = null;
 
   function render() {
-    if (route() === 'katil') return renderJoin();
+    if (route() === 'katil') { if (S.isDemo) { S.setMode('real'); return; } return renderJoin(); }
     if (user) user = S.user(user.id) || user;
     if (!user) { if (route() === 'd') pendingDeep = location.hash; return renderLogin(); }
     const r = route();
@@ -216,7 +217,7 @@
       <header class="topbar">
         <div class="grow">
           <h1>${r === 'home' || !titles[r] ? brandHTML('bar') : esc(titles[r])}</h1>
-          <div class="sub">${syncLabel()}</div>
+          <div class="sub">${S.isDemo ? '<span class="demo-pill">DEMO</span>' : ''}${syncLabel()}</div>
         </div>
         <button class="scan-btn" data-act="scan" aria-label="Karekod okut"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg></button>
         <button class="avatar" data-act="profile" aria-label="Profil">${esc(initials(user.name))}</button>
@@ -230,27 +231,27 @@
   }
 
   // ---------- giriş
-  let pin = '', loginUser = null, pinErr = '', fails = 0, lockUntil = 0, showDemo = false, clockT = null;
+  let pin = '', loginUser = null, pinErr = '', fails = 0, lockUntil = 0, showDemo = S.isDemo, clockT = null;
+  const DEMO_USER = { id: '__demo', name: 'Demo hesabı', role: 'demo' };
   const AV_COLORS = ['#c2662d', '#3f8f5a', '#4a6a85', '#8a4fa3', '#b4532a', '#2f7f86', '#a3243b'];
   const avColor = n => AV_COLORS[[...(n || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length];
-  const lastUserId = () => { try { return localStorage.getItem('kafestok.lastUser'); } catch (e) { return null; } };
+  const lastUserId = () => { try { return localStorage.getItem(LKEY); } catch (e) { return null; } };
   function renderLogin() {
     const db = S.get();
+    if (!S.isDemo && !db.users.length) return renderSetup();
     clearTimeout(clockT); clockT = setTimeout(() => { if (!user && !loginUser) renderLogin(); }, 30000);
     const now = new Date();
     const hour = now.getHours(), greet = hour < 6 ? 'İyi geceler' : hour < 12 ? 'Günaydın' : hour < 18 ? 'İyi günler' : 'İyi akşamlar';
     const last = lastUserId();
     const users = [...db.users].sort((a, b) => (b.id === last) - (a.id === last));
-    const roleTxt = u => u.role === 'yonetici' ? 'Yönetici' : roleName(u.role) + ((u.deptIds || []).length ? ' · ' + u.deptIds.map(d => S.dept(d)?.name).filter(Boolean).join(', ') : '');
-    const u = loginUser && S.user(loginUser);
+    const roleTxt = u => u.role === 'demo' ? 'Örnek verilerle deneme · PIN 0000' : u.role === 'yonetici' ? 'Yönetici' : roleName(u.role) + ((u.deptIds || []).length ? ' · ' + u.deptIds.map(d => S.dept(d)?.name).filter(Boolean).join(', ') : '');
+    const u = loginUser === '__demo' ? DEMO_USER : loginUser && S.user(loginUser);
     const locked = Date.now() < lockUntil;
     $app.innerHTML = `
       <div class="login">
         <div class="login-glow"></div>
-        <div class="login-top">
-          ${cafeMode() === 'name' ? `<div class="brand-mark"><img src="icon.svg" alt=""></div>` : `<div class="brand-logo ${cafeMode() === 'logo' ? 'wide' : ''} bg-${db.cafe.logoBg || 'light'}"><img src="${db.cafe.logo}" alt="${esc(db.cafe.name)}"></div>`}
-          <div>${cafeMode() !== 'logo' ? `<div class="login-cafe">${esc(db.cafe.name)}</div>` : ''}<div class="login-tag">Stok · Sipariş · Demirbaş</div></div>
-        </div>
+        <div class="login-top">${brandLoginTop(db)}</div>
+        ${S.isDemo ? `<div class="demo-banner">🧪 <b>DEMO</b> · örnek veriler, sadece bu telefonda <button data-act="exit-demo">Gerçek kafeye dön ›</button></div>` : ''}
         ${!u ? `
         <div class="login-clock">${now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
         <div class="login-date">${now.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })} · ${greet}</div>
@@ -262,12 +263,13 @@
             ${x.id === last ? '<span class="ur-last">Son giriş</span>' : ''}
             <span class="ur-arrow">›</span>
           </button>`).join('')}</div>
-        ${!Sync.cloud ? `<button class="connect-link" data-act="scan">📷 Bu telefonu kafeye bağla</button>` : ''}
-        <button class="demo-link" data-act="demo-pins">${showDemo ? 'Demo PIN: ' + db.users.map(x => `${esc(x.name)} ${esc(x.pin)}`).join(' · ') : 'Demo PIN’lerini göster'}</button>`
+        ${S.isDemo ? `<button class="demo-link" data-act="demo-pins">${showDemo ? 'Demo PIN: ' + db.users.map(x => `${esc(x.name)} ${esc(x.pin)}`).join(' · ') : 'Demo PIN’lerini göster'}</button>`
+          : `<button class="user-row demo-row" data-act="pick-user" data-id="__demo"><span class="avatar">🧪</span><span class="ur-main"><b>Demo hesabı</b><small>Örnek verilerle dene · gerçek kafeye karışmaz</small></span><span class="ur-arrow">›</span></button>
+        ${!Sync.cloud ? `<button class="connect-link" data-act="scan">📷 Bu telefonu kafeye bağla</button>` : ''}`}`
         : `
         <button class="login-back" data-act="login-back">‹ Kullanıcı değiştir</button>
         <div class="pin-user">
-          <span class="avatar big" style="background:${avColor(u.name)}">${esc(initials(u.name))}</span>
+          <span class="avatar big" style="background:${u.role === 'demo' ? '#444' : avColor(u.name)}">${u.role === 'demo' ? '🧪' : esc(initials(u.name))}</span>
           <div class="pin-hello">Merhaba, ${esc(u.name)}</div>
           <div class="pin-sub">${esc(roleTxt(u))}</div>
         </div>
@@ -282,10 +284,14 @@
     pinErr = '';
     if (k === '⌫') pin = pin.slice(0, -1); else if (pin.length < 4) pin += k;
     if (pin.length === 4) {
+      if (loginUser === '__demo') {
+        if (pin === '0000') { S.setMode('demo'); return; }
+        pin = ''; pinErr = 'Demo PIN’i 0000'; renderLogin(); return;
+      }
       const u = S.user(loginUser);
       if (u && u.pin === pin) {
         user = u; pin = ''; loginUser = null; fails = 0; clearTimeout(clockT);
-        try { localStorage.setItem('kafestok.user', u.id); localStorage.setItem('kafestok.lastUser', u.id); } catch (e) {}
+        try { localStorage.setItem(UKEY, u.id); localStorage.setItem(LKEY, u.id); } catch (e) {}
         location.hash = pendingDeep || '#/home'; pendingDeep = null; render(); return;
       }
       fails++; pin = '';
@@ -300,6 +306,131 @@
     if (/^\d$/.test(e.key)) pressPin(e.key); else if (e.key === 'Backspace') pressPin('⌫'); else if (e.key === 'Escape') { loginUser = null; pin = ''; renderLogin(); }
   });
 
+  // ---------- İLK KURULUM (gerçek kafe, henüz kullanıcı yok)
+  function renderSetup() {
+    const db = S.get();
+    if (Sync.cloud) { // buluta bağlı ama kullanıcılar henüz inmedi
+      $app.innerHTML = `<div class="login"><div class="login-glow"></div><div class="login-top">${brandLoginTop(db)}</div>
+        <div class="setup-box"><b>Kafenin verileri indiriliyor…</b><p>İnternet bağlantısını kontrol et. Uzun sürerse uygulamayı kapatıp aç.</p></div></div>`;
+      return;
+    }
+    $app.innerHTML = `
+      <div class="login">
+        <div class="login-glow"></div>
+        <div class="login-top">${brandLoginTop(db)}</div>
+        <div class="setup-title">Hoş geldin 👋</div>
+        <div class="setup-sub">Bu telefon için başlangıç yolunu seç.</div>
+        <button class="setup-opt main" data-act="setup-new"><span>🏁</span><div><b>Yeni kafe kur</b><small>İlk telefon. Yönetici olarak sen başlarsın, liste boş gelir; malzemeleri kendin eklersin.</small></div></button>
+        <button class="setup-opt" data-act="scan"><span>📷</span><div><b>Kurulu kafeye bağlan</b><small>Yöneticinin “Cihaz ekle” karekodunu okut.</small></div></button>
+        <button class="setup-opt" data-act="go-demo"><span>🧪</span><div><b>Demo'yu incele</b><small>Örnek verilerle dene. Gerçek kafeye karışmaz. PIN: 0000</small></div></button>
+      </div>`;
+  }
+  function brandLoginTop(db) {
+    return `${cafeMode() === 'name' ? `<div class="brand-mark"><img src="icon.svg" alt=""></div>` : `<div class="brand-logo ${cafeMode() === 'logo' ? 'wide' : ''} bg-${db.cafe.logoBg || 'light'}"><img src="${db.cafe.logo}" alt="${esc(db.cafe.name)}"></div>`}
+      <div>${cafeMode() !== 'logo' ? `<div class="login-cafe">${esc(db.cafe.name)}</div>` : ''}<div class="login-tag">Stok · Sipariş · Demirbaş</div></div>`;
+  }
+  function openSetupNew() {
+    sheet(`
+      <h3>Yeni kafe kur</h3><div class="sub">Yönetici hesabını oluştur. Diğer çalışanları sonra Ayarlar'dan eklersin.</div>
+      <label class="field"><span>Kafe adı</span><input id="sCafe" value="${esc(S.get().cafe.name)}"></label>
+      <label class="field"><span>Senin adın</span><input id="sName" placeholder="örn. Mahmut Şahin"></label>
+      <div class="field-row" style="grid-template-columns:1fr 1fr">
+        <label class="field"><span>PIN (4 rakam)</span><input id="sPin" inputmode="numeric" maxlength="4" type="password"></label>
+        <label class="field"><span>PIN tekrar</span><input id="sPin2" inputmode="numeric" maxlength="4" type="password"></label>
+      </div>
+      <div class="small muted" id="sMsg" style="margin-bottom:10px">PIN’i unutma; giriş için her seferinde istenir.</div>
+      <button class="btn primary block" id="sGo">Kafeyi kur</button>`,
+      sh => {
+        sh.querySelector('#sGo').onclick = () => {
+          const cafe = sh.querySelector('#sCafe').value.trim(), name = sh.querySelector('#sName').value.trim();
+          const p1 = sh.querySelector('#sPin').value.trim(), p2 = sh.querySelector('#sPin2').value.trim(), msg = sh.querySelector('#sMsg');
+          if (!cafe || !name) return (msg.textContent = '⚠️ Kafe adı ve adın boş olamaz');
+          if (!/^\d{4}$/.test(p1)) return (msg.textContent = '⚠️ PIN 4 rakam olmalı');
+          if (p1 !== p2) return (msg.textContent = '⚠️ İki PIN aynı değil');
+          if (p1 === '0000') return (msg.textContent = '⚠️ 0000 demo için ayrıldı, başka bir PIN seç');
+          user = S.createFirstAdmin(name, p1, cafe);
+          try { localStorage.setItem(UKEY, user.id); localStorage.setItem(LKEY, user.id); } catch (e) {}
+          closeSheet(true); location.hash = '#/home'; render(); toast('Kafe kuruldu. Ana sayfadaki adımlarla devam et.');
+        };
+      });
+  }
+
+  // ---------- Ana sayfa: yapılacaklar listesi (gerçek kafe, yönetici)
+  function onboardCard() {
+    if (S.isDemo || !isAdmin()) return '';
+    let hidden = false; try { hidden = localStorage.getItem('kafestok.onboardHide') === '1'; } catch (e) {}
+    const db = S.get();
+    const steps = [
+      ['Bölümleri kontrol et', 'Nargile, Bar, Mutfak, Genel hazır; değiştir ya da ekle', db.depts.length > 0 && db.cafe.deptsOk, 'ob-depts'],
+      ['Tedarikçileri ekle', 'Kimden mal alıyorsun? WhatsApp numaralarıyla', db.suppliers.length > 0, 'new-sup'],
+      ['Malzemeleri ekle', 'Örnek listeden işaretleyerek hızlıca ekleyebilirsin', db.items.length > 0, 'tpl-import'],
+      ['Malzemelere tedarikçi ata', 'Sipariş listesi tedarikçiye göre oluşur', db.items.length > 0 && db.items.every(i => i.supplierId), 'go-settings-items'],
+      ['İlk sayımı yap', 'Elindeki miktarları gir', db.movements.some(m => m.type === 'sayim'), 'go-sayim'],
+      ['Demirbaşları ekle', 'TV, uydu alıcısı, okey masaları… sonra etiket yazdır', db.assets.length > 0, 'new-asset'],
+      ['Çalışanları ekle', 'Her biri için rol, PIN ve yetkiler', db.users.length > 1, 'new-user'],
+      ['Telefonları bağla', 'Bulutu kur, diğer telefonlara karekod okut', !!Sync.cloud, 'go-cloud-setup'],
+    ];
+    const done = steps.filter(s => s[2]).length;
+    if (hidden || done === steps.length) return '';
+    const next = steps.findIndex(s => !s[2]);
+    return `<div class="card onboard">
+      <div class="ob-head"><div><b>Kurulum adımları</b><div class="small muted">${done} / ${steps.length} tamamlandı</div></div>
+        <button class="btn ghost sm" data-act="ob-hide">Gizle</button></div>
+      <div class="ob-bar"><span style="width:${done / steps.length * 100}%"></span></div>
+      ${steps.map(([t, d, ok, act], i) => `<button class="ob-step ${ok ? 'ok' : ''} ${i === next ? 'next' : ''}" data-act="${act}">
+        <span class="ob-n">${ok ? '✓' : i + 1}</span><div class="ob-t"><b>${t}</b><small>${d}</small></div>${ok ? '' : '<span class="ob-go">›</span>'}</button>`).join('')}
+    </div>`;
+  }
+
+  // ---------- örnek listeden malzeme ekle
+  function openTemplate() {
+    const tpl = S.template(), db = S.get();
+    const has = x => db.items.some(i => i.deptId === x.deptId && i.name.toLocaleLowerCase('tr') === x.name.toLocaleLowerCase('tr'));
+    const sel = new Set();
+    sheet(`
+      <h3>Örnek listeden ekle</h3><div class="sub">Kafende olanları işaretle. Miktarlar 0 gelir, ilk sayımda girersin. Minimum ve hedefleri sonra değiştirebilirsin.</div>
+      ${tpl.depts.map(d => {
+        const its = tpl.items.filter(i => i.deptId === d.id);
+        return `<div class="tpl-group"><div class="tpl-head"><b>${d.icon} ${esc(d.name)}</b><button class="btn ghost sm" data-tall="${d.id}">Tümü</button></div>
+          ${its.map(i => `<label class="perm-row ${has(i) ? 'dis' : ''}"><input type="checkbox" data-tpl="${i.id}" ${has(i) ? 'disabled checked' : ''}>
+            <div><b>${esc(i.name)}</b><small>${has(i) ? 'Zaten listende' : `${esc(i.unit)} · min ${fmt(i.min)} · hedef ${fmt(i.target)}`}</small></div></label>`).join('')}</div>`;
+      }).join('')}
+      <div class="sticky-sheet-btn"><button class="btn primary block" id="tplGo" disabled>Seçilenleri ekle</button></div>`,
+      sh => {
+        const btn = sh.querySelector('#tplGo');
+        const upd = () => { btn.disabled = !sel.size; btn.textContent = sel.size ? `${sel.size} malzemeyi ekle` : 'Seçilenleri ekle'; };
+        sh.querySelectorAll('[data-tpl]:not(:disabled)').forEach(c => c.onchange = () => { c.checked ? sel.add(c.dataset.tpl) : sel.delete(c.dataset.tpl); upd(); });
+        sh.querySelectorAll('[data-tall]').forEach(b => b.onclick = () => {
+          const cs = [...sh.querySelectorAll('[data-tpl]:not(:disabled)')].filter(c => tpl.items.find(i => i.id === c.dataset.tpl).deptId === b.dataset.tall);
+          const all = cs.every(c => c.checked);
+          cs.forEach(c => { c.checked = !all; c.checked ? sel.add(c.dataset.tpl) : sel.delete(c.dataset.tpl); }); upd();
+        });
+        btn.onclick = () => {
+          S.importItems(tpl.items.filter(i => sel.has(i.id)), user.name);
+          closeSheet(); render(); toast(`${sel.size} malzeme eklendi. Şimdi tedarikçi ata ve sayım yap.`);
+        };
+      });
+  }
+
+  // ---------- gerçek kafeyi sıfırla
+  function openResetCafe() {
+    sheet(`
+      <h3>Kafeyi sıfırla</h3>
+      <div class="card small" style="box-shadow:none;background:var(--bad-soft);margin-bottom:12px">⚠️ Malzemeler, tedarikçiler, siparişler, sayım geçmişi, demirbaşlar ve <b>senin dışındaki tüm kullanıcılar</b> silinir.${Sync.cloud ? ' Buluta bağlı <b>tüm telefonlardan</b> da silinir.' : ''} Kafe adı, logo ve bölümler kalır. Geri alınamaz.</div>
+      <div class="small muted" style="margin-bottom:8px">Önce yedek almak istersen: Ayarlar → Yedek indir.</div>
+      <label class="field"><span>Onaylamak için <b>SIFIRLA</b> yaz</span><input id="rsTxt" autocapitalize="characters" autocomplete="off"></label>
+      <button class="btn danger block" id="rsGo" disabled>Kafeyi sıfırla</button>`,
+      sh => {
+        const inp = sh.querySelector('#rsTxt'), go = sh.querySelector('#rsGo');
+        inp.oninput = () => { go.disabled = inp.value.trim().replace(/[iİıI]/g, 'I').toUpperCase() !== 'SIFIRLA'; };
+        go.onclick = () => {
+          S.resetCafe(user.id);
+          try { localStorage.removeItem('kafestok.onboardHide'); } catch (e) {}
+          closeSheet(); location.hash = '#/home'; render(); toast('Kafe sıfırlandı. Kurulum adımlarıyla baştan doldurabilirsin.');
+        };
+      });
+  }
+
   // ---------- ÖZET
   function viewHome() {
     const db = S.get();
@@ -307,6 +438,7 @@
     const enRoute = db.orders.filter(o => o.status === 'verildi');
     const greet = new Date().getHours() < 12 ? 'Günaydın' : new Date().getHours() < 18 ? 'İyi günler' : 'İyi akşamlar';
     return `
+      ${onboardCard()}
       <div class="muted small" style="margin:2px 2px 10px">${greet}, <b style="color:var(--ink)">${esc(user.name)}</b> · ${new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
       ${crit.length ? `
         <div class="alert">
@@ -366,7 +498,7 @@
     let its = db.items.filter(i => (ui.stokDept === 'all' || i.deptId === ui.stokDept)
       && (!q || i.name.toLocaleLowerCase('tr').includes(q))
       && (!ui.onlyCrit || S.needsOrder(i)));
-    const rank = { bitti: 0, kritik: 1, azaliyor: 2, iyi: 3 };
+    const rank = { yeni: -1, bitti: 0, kritik: 1, azaliyor: 2, iyi: 3 };
     its.sort((a, b) => rank[S.status(a)] - rank[S.status(b)] || a.name.localeCompare(b.name, 'tr'));
     const critIn = id => db.items.filter(i => (id === 'all' || i.deptId === id) && S.needsOrder(i)).length;
     return `
@@ -387,10 +519,11 @@
             <div class="s">${ui.stokDept === 'all' ? esc(S.dept(it.deptId)?.name) + ' · ' : ''}min ${fmt(it.min)} · ${esc(sup?.name || 'tedarikçi yok')}${pend ? pendLabel(it.id) : ''}</div>
             ${bar(it)}
           </div>
-          <div class="qty"><span class="n" style="color:${st === 'iyi' ? 'var(--ink)' : `var(--${st === 'azaliyor' ? 'warn' : 'bad'})`}">${fmt(it.qty)}</span><span class="u">${esc(it.unit)}</span>
+          <div class="qty"><span class="n" style="color:${st === 'iyi' ? 'var(--ink)' : st === 'yeni' ? 'var(--muted)' : `var(--${st === 'azaliyor' ? 'warn' : 'bad'})`}">${st === 'yeni' ? '–' : fmt(it.qty)}</span><span class="u">${esc(it.unit)}</span>
             <div><span class="badge st-${st}">${ST_LABEL[st]}</span></div></div>
         </button>`;
-      }).join('') || '<div class="empty"><div class="e">🔍</div>Eşleşen malzeme yok</div>'}</div>
+      }).join('') || (db.items.length ? '<div class="empty"><div class="e">🔍</div>Eşleşen malzeme yok</div>'
+        : `<div class="empty"><div class="e">📦</div><b>Henüz malzeme yok</b><br>${can('malzeme') ? `<button class="btn primary" style="margin-top:12px" data-act="tpl-import">📋 Örnek listeden ekle</button>` : 'Yetkili kişi malzemeleri ekleyince burada görünür.'}</div>`)}</div>
       ${can('malzeme') ? `<button class="btn block" style="margin-top:12px" data-act="new-item">+ Malzeme ekle</button>` : ''}`;
   }
 
@@ -412,7 +545,7 @@
         return `<div class="row ${d !== undefined ? 'changed' : ''}" data-row="${it.id}">
           <div class="main">
             <div class="t">${esc(it.name)}</div>
-            <div class="s">Son: <span class="was">${fmt(it.qty)}</span> ${esc(it.unit)} · ${ago(it.updatedAt)}</div>
+            <div class="s">${it.uncounted ? '<b style="color:var(--warn)">Henüz sayılmadı</b> · elindekini yaz' : `Son: <span class="was">${fmt(it.qty)}</span> ${esc(it.unit)} · ${ago(it.updatedAt)}`}</div>
           </div>
           <div class="stepper">
             <button data-act="cnt" data-id="${it.id}" data-d="-1">−</button>
@@ -427,7 +560,7 @@
   function setDraft(id, v) {
     const it = S.item(id);
     v = Math.max(0, Math.round(v * 100) / 100);
-    if (v === it.qty) delete ui.sayimDraft[id]; else ui.sayimDraft[id] = v;
+    if (v === it.qty && !it.uncounted) delete ui.sayimDraft[id]; else ui.sayimDraft[id] = v;
     const row = document.querySelector(`[data-row="${id}"]`);
     row?.classList.toggle('changed', ui.sayimDraft[id] !== undefined);
     const inp = document.querySelector(`[data-cnt="${id}"]`);
@@ -965,13 +1098,19 @@
 
   // ---------- BULUT (senkron) arayüzü
   const SYNC_TXT = {
-    local: ['Bu cihazda kayıtlı', 'warn'], connecting: ['Buluta bağlanıyor…', 'warn'], online: ['Bulutla eşit', 'ok'],
+    demo: ['Örnek veriler · sadece bu telefonda', 'off'], local: ['Bu cihazda kayıtlı', 'warn'], connecting: ['Buluta bağlanıyor…', 'warn'], online: ['Bulutla eşit', 'ok'],
     syncing: ['Gönderiliyor…', 'warn'], offline: ['Çevrimdışı · sonra gönderilecek', 'off'], error: ['Bağlantı sorunu', 'bad'],
   };
   const syncLabel = () => { const [t, c] = SYNC_TXT[Sync.state.status] || SYNC_TXT.local; return `<span class="sync s-${c}" data-act="go-cloud"><i></i> ${t}</span>`; };
-  Sync.onState(() => { document.querySelectorAll('.topbar .sub').forEach(el => { el.innerHTML = syncLabel(); }); if (route() === 'ayarlar' && !document.querySelector('.sheet')) render(); });
+  Sync.onState(() => { document.querySelectorAll('.topbar .sub').forEach(el => { el.innerHTML = (S.isDemo ? '<span class="demo-pill">DEMO</span>' : '') + syncLabel(); }); if (route() === 'ayarlar' && !document.querySelector('.sheet')) render(); });
 
   function cloudSection() {
+    if (S.isDemo) return `<h2 class="section">Demo</h2>
+      <div class="card stack">
+        <div style="display:flex;gap:10px;align-items:flex-start"><span style="font-size:26px">🧪</span><div><b>Demo hesabındasın.</b>
+        <div class="small muted">Buradaki veriler örnektir, sadece bu telefonda durur ve buluta gitmez. İstediğin gibi dene, bozarsan sıfırla.</div></div></div>
+        <div class="btn-row"><button class="btn sm" data-act="reset">Demo verilerini sıfırla</button><button class="btn primary sm" data-act="exit-demo">Gerçek kafeye dön</button></div>
+      </div>`;
     const st = Sync.state, c = Sync.cloud;
     const [t, cls] = SYNC_TXT[st.status] || SYNC_TXT.local;
     if (!c) {
@@ -1016,7 +1155,7 @@
           if (wipe && !confirm('Örnek veriler silinecek. Devam edilsin mi?')) return;
           btn.disabled = true; btn.textContent = 'Kuruluyor…'; msg.textContent = 'Buluta bağlanılıyor…';
           try {
-            if (wipe) { S.wipeDemo(pin); user = S.get().users[0]; try { localStorage.setItem('kafestok.user', user.id); } catch (e) {} }
+            if (wipe) { S.wipeDemo(pin); user = S.get().users[0]; try { localStorage.setItem(UKEY, user.id); } catch (e) {} }
             await Sync.setup({ type: window.__cloudType || 'firebase', config });
             closeSheet(); render(); toast('Bulut kuruldu. Şimdi diğer telefonları ekleyebilirsin.');
             setTimeout(openAddDevice, 400);
@@ -1074,7 +1213,7 @@
     btn.disabled = true; btn.textContent = 'Bağlanıyor…'; msg.textContent = '';
     try {
       await Sync.join(p);
-      user = null; try { localStorage.removeItem('kafestok.user'); } catch (e) {}
+      user = null; try { localStorage.removeItem(UKEY); } catch (e) {}
       msg.textContent = 'Veriler indiriliyor…';
       // kullanıcı listesi gelene kadar kısa bekle
       for (let i = 0; i < 40 && !S.get().users.length; i++) await new Promise(r => setTimeout(r, 150));
@@ -1105,18 +1244,19 @@
         <div class="cafe-thumb">${db.cafe.logo ? `<img src="${db.cafe.logo}" alt="">` : '☕'}</div>
         <div class="main"><div class="t">${esc(db.cafe.name)}</div><div class="s">Logo ve isim · ${CAFE_MODES.find(x => x[0] === cafeMode())[1]}</div></div><span class="muted">›</span></button></div>
       ${sec('Kullanıcılar ve yetkiler', 'new-user', db.users.map(u => `<button class="row" data-act="edit-user" data-id="${u.id}"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)} <span class="role-tag r-${u.role}">${roleName(u.role)}</span></div><div class="s">${u.role === 'yonetici' ? 'Tüm yetkiler' : esc(permSummary(u))}</div></div><span class="muted">›</span></button>`).join(''))}`;
-    if (can('malzeme')) out += sec('Malzemeler', 'new-item', db.depts.map(d => {
+    if (can('malzeme')) out += sec('Malzemeler', 'new-item', `<button class="row" data-act="tpl-import" style="color:var(--accent);font-weight:700">📋 Örnek listeden ekle</button>` + db.depts.map(d => {
       const n = db.items.filter(i => i.deptId === d.id).length;
       return `<button class="row" data-act="manage-items" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div><div class="s">${n} malzeme</div></div><span class="muted">›</span></button>`;
     }).join(''));
     if (can('tedarikci')) out += sec('Tedarikçiler', 'new-sup', db.suppliers.map(s => `<button class="row" data-act="edit-sup" data-id="${s.id}"><div class="main"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.contact || '')} ${s.phone ? '· +' + esc(s.phone) : ''}</div></div><span class="muted">›</span></button>`).join(''));
     if (can('bolum')) out += sec('Bölümler', 'new-dept', db.depts.map(d => `<button class="row" data-act="edit-dept" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div></div><span class="muted">›</span></button>`).join(''));
     out += themes;
+    if (!S.isDemo) out += `<h2 class="section">Demo</h2><div class="list"><button class="row" data-act="go-demo"><span style="font-size:20px">🧪</span><div class="main"><div class="t">Demo'yu aç</div><div class="s">Örnek verilerle dene · PIN 0000 · gerçek kafeye karışmaz</div></div><span class="muted">›</span></button></div>`;
     if (isAdmin()) out += `
       <h2 class="section">Veri</h2>
       <div class="card stack small">
         <div>Tüm verileri (malzeme, sipariş, demirbaş, geçmiş) tek dosya olarak telefona indirir.</div>
-        <div class="btn-row"><button class="btn sm" data-act="export">Yedek indir</button>${Sync.cloud ? '' : `<button class="btn danger sm" data-act="reset">Demo veriye dön</button>`}</div>
+        <div class="btn-row"><button class="btn sm" data-act="export">Yedek indir</button>${S.isDemo ? '' : `<button class="btn danger sm" data-act="reset-cafe">Kafeyi sıfırla</button>`}</div>
       </div>`;
     if (!isAdmin() && !canAnyRecords()) out += `<div class="empty small">Malzeme, tedarikçi ve kullanıcı ayarlarını yetkili kişiler değiştirebilir.</div>`;
     return out;
@@ -1383,10 +1523,20 @@
       'pick-user': () => { loginUser = id; pin = ''; pinErr = ''; renderLogin(); },
       'login-back': () => { loginUser = null; pin = ''; pinErr = ''; renderLogin(); },
       'demo-pins': () => { showDemo = !showDemo; renderLogin(); },
+      'go-demo': () => S.setMode('demo'),
+      'exit-demo': () => S.setMode('real'),
+      'setup-new': () => openSetupNew(),
+      'tpl-import': () => openTemplate(),
+      'reset-cafe': () => openResetCafe(),
+      'ob-hide': () => { try { localStorage.setItem('kafestok.onboardHide', '1'); } catch (e) {} render(); toast('Kurulum adımları gizlendi'); },
+      'ob-depts': () => { S.setCafe({ deptsOk: true }); location.hash = '#/ayarlar'; setTimeout(() => document.querySelector('[data-act=new-dept]')?.scrollIntoView({ block: 'center' }), 120); },
+      'go-sayim': () => { location.hash = '#/sayim'; },
+      'go-settings-items': () => { location.hash = '#/ayarlar'; },
+      'go-cloud-setup': () => { location.hash = '#/ayarlar'; setTimeout(() => openCloudSetup(), 150); },
       skin: () => { setSkin(id); render(); },
       pin: () => pressPin(el.dataset.k),
       profile: () => { location.hash = '#/ayarlar'; },
-      logout: () => { user = null; closeSheet(true); try { localStorage.removeItem('kafestok.user'); } catch (e) {} render(); },
+      logout: () => { user = null; closeSheet(true); try { localStorage.removeItem(UKEY); } catch (e) {} render(); },
       'open-dept': () => { ui.stokDept = id; location.hash = '#/stok'; },
       'go-yolda': () => { ui.sipTab = 'yolda'; },
       'go-gecmis': () => { ui.sipTab = 'gecmis'; },
@@ -1452,14 +1602,14 @@
         a2.href = URL.createObjectURL(new Blob([S.exportJSON()], { type: 'application/json' }));
         a2.download = `kafestok-yedek-${new Date().toISOString().slice(0, 10)}.json`; a2.click();
       },
-      reset: () => { if (confirm('Tüm veriler demo veriyle değiştirilsin mi?')) { S.reset(); toast('Demo veri yüklendi'); } },
+      reset: () => { if (S.isDemo && confirm('Demo verileri ilk haline dönsün mü?')) { S.reset(); toast('Demo sıfırlandı'); } },
     };
     acts[a]?.();
   });
 
   // ---------- başlat
   S.init();
-  try { user = S.user(localStorage.getItem('kafestok.user')) || null; } catch (e) {}
+  try { user = S.user(localStorage.getItem(UKEY)) || null; } catch (e) {}
   // başka cihazdan veri gelince ekranı yenile; yazı yazılırken bekle ki klavye kapanmasın
   let deferred = false;
   function renderSafe() {

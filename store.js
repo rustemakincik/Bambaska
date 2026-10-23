@@ -3,7 +3,20 @@
  * Firestore'a bağlanacak; ekranlar sadece bu dosyadaki fonksiyonları çağırır.
  */
 const Store = (() => {
-  const KEY = 'kafestok.v1';
+  // İki ayrı veri alanı: gerçek kafe (buluta bağlanır) ve demo (sadece bu telefonda, örnek verili)
+  const IS_DEMO = (() => { try { return localStorage.getItem('kafestok.mode') === 'demo'; } catch (e) { return false; } })();
+  const KEY = IS_DEMO ? 'kafestok.demo' : 'kafestok.v1';
+  const DEFAULT_CAFE = { name: 'Bambaşka Kafe Restoran', logo: 'logo.png', mode: 'logo', logoBg: 'none' };
+  const DEFAULT_DEPTS = [
+    { id: 'nargile', name: 'Nargile', icon: '💨', color: '#b4532a' },
+    { id: 'bar', name: 'Bar', icon: '☕', color: '#7a4b2a' },
+    { id: 'mutfak', name: 'Mutfak', icon: '🍳', color: '#5b7a3a' },
+    { id: 'genel', name: 'Genel', icon: '🧻', color: '#4a6a85' },
+  ];
+  // gerçek kafe: boş başlar, ilk açılışta yönetici oluşturulur
+  function emptyDb() {
+    return { version: 1, cafe: { ...DEFAULT_CAFE }, depts: DEFAULT_DEPTS.map(d => ({ ...d })), suppliers: [], items: [], movements: [], orders: [], users: [], assets: [], assetLog: [] };
+  }
   const subs = new Set();
   let db = null;
 
@@ -84,7 +97,7 @@ const Store = (() => {
       { id: 'u2', name: 'Mehmet', role: 'personel', pin: '1111', deptIds: ['nargile'] },
       { id: 'u3', name: 'Ayşe', role: 'personel', pin: '2222', deptIds: ['bar', 'mutfak'] },
     ];
-    return { version: 1, cafe: { name: 'Bambaşka Kafe Restoran', logo: 'logo.png', mode: 'logo', logoBg: 'none' }, depts, suppliers, items, movements, orders, users, ...seedAssets() };
+    return { version: 1, cafe: { ...DEFAULT_CAFE, name: 'Bambaşka (Demo)' }, depts, suppliers, items, movements, orders, users, ...seedAssets() };
   }
 
   // ---- demirbaş
@@ -135,8 +148,8 @@ const Store = (() => {
 
   function load() {
     try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
-    if (!db || db.version !== 1) { db = seed(); persist(); }
-    if (!db.assets) { Object.assign(db, seedAssets()); persist(); } // eski kayıtlara demirbaş ekle
+    if (!db || db.version !== 1) { db = IS_DEMO ? seed() : emptyDb(); persist(); }
+    if (!db.assets) { Object.assign(db, IS_DEMO ? seedAssets() : { assets: [], assetLog: [] }); persist(); }
   }
   function persist() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }
   const commitHooks = new Set();
@@ -169,12 +182,13 @@ const Store = (() => {
 
   // ---- yardımcılar
   const status = it => {
+    if (it.uncounted) return 'yeni';
     if (it.qty <= 0) return 'bitti';
     if (it.qty <= it.min) return 'kritik';
     if (it.qty <= it.min * 1.5) return 'azaliyor';
     return 'iyi';
   };
-  const needsOrder = it => it.qty <= it.min;
+  const needsOrder = it => !it.uncounted && it.qty <= it.min;
   const suggested = it => {
     const q = Math.max(it.target - it.qty, 0);
     return Math.ceil(q * 2) / 2; // yarım birime yuvarla
@@ -182,6 +196,29 @@ const Store = (() => {
 
   return {
     init: load,
+    isDemo: IS_DEMO,
+    setMode(m) { try { localStorage.setItem('kafestok.mode', m); } catch (e) {} location.reload(); },
+    // örnek liste (demo verisi): gerçek kafeye işaretleyerek malzeme eklemek için
+    template() { const t = seed(); return { depts: t.depts, items: t.items.map(({ id, deptId, name, unit, min, target }) => ({ id, deptId, name, unit, min, target })) }; },
+    importItems(list, user) {
+      const tdepts = seed().depts;
+      list.forEach(x => {
+        if (!db.depts.some(d => d.id === x.deptId)) { const td = tdepts.find(d => d.id === x.deptId); if (td) db.depts.push({ ...td }); }
+        if (db.items.some(i => i.deptId === x.deptId && i.name.toLocaleLowerCase('tr') === x.name.toLocaleLowerCase('tr'))) return;
+        db.items.push({ id: uid(), deptId: x.deptId, name: x.name, unit: x.unit, qty: 0, uncounted: true, min: x.min, target: x.target, supplierId: '', updatedAt: now(), updatedBy: user });
+      });
+      commit();
+    },
+    createFirstAdmin(name, pin, cafeName) {
+      const u = { id: uid(), name, pin, role: 'yonetici', deptIds: [], perms: {} };
+      db.users.push(u); if (cafeName) db.cafe.name = cafeName; commit(); return u;
+    },
+    // gerçek kafeyi sıfırla: kafe kimliği, bölümler ve bu yönetici kalır; diğer her şey silinir (buluttan da)
+    resetCafe(keepUserId) {
+      const me = db.users.find(u => u.id === keepUserId);
+      Object.assign(db, { suppliers: [], items: [], movements: [], orders: [], assets: [], assetLog: [], users: me ? [me] : [] });
+      commit();
+    },
     // ---- bulut senkronu için (sync.js kullanır)
     onCommit: f => (commitHooks.add(f), () => commitHooks.delete(f)),
     COLLS: ['depts', 'suppliers', 'items', 'movements', 'orders', 'users', 'assets', 'assetLog'],
@@ -215,7 +252,9 @@ const Store = (() => {
       const it = this.item(itemId); if (!it) return;
       const before = it.qty;
       const after = Math.max(0, Math.round(newQty * 100) / 100);
-      if (before === after) return false;
+      const first = it.uncounted && type === 'sayim';
+      if (before === after && !first) return false;
+      if (first) delete it.uncounted; // ilk sayım (0 da olsa) kaydedilir
       it.qty = after; it.updatedAt = now(); it.updatedBy = user;
       db.movements.unshift({ id: uid(), itemId, type, before, after, user, at: now(), note });
       db.movements = db.movements.slice(0, 500);
@@ -376,6 +415,6 @@ const Store = (() => {
     },
     removeAsset(id) { db.assets = db.assets.filter(a => a.id !== id); commit(); },
     exportJSON: () => JSON.stringify(db, null, 2),
-    reset() { db = seed(); commit(); },
+    reset() { db = IS_DEMO ? seed() : emptyDb(); commit(); },
   };
 })();
