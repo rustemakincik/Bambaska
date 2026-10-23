@@ -440,3 +440,14 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
   .b-doc .b-logo { height: 40px; }
 }
 @media print { .p-meta { width: auto; margin-left: auto; border-top: 0; } .p-meta tr { display: table-row; } .p-meta td { padding: 1px 10px 1px 0; } .p-meta th { text-align: right; } }
+
+/* ---------- roller ve yetkiler */
+.role-tag { display: inline-block; font-size: 10.5px; font-weight: 800; padding: 1px 7px; border-radius: 99px; margin-left: 4px; vertical-align: 2px; background: var(--line); color: var(--muted); }
+.role-tag.r-yonetici { background: var(--accent); color: #fff; }
+.role-tag.r-mudur { background: var(--accent-soft); color: var(--accent); }
+.perm-group { margin-bottom: 12px; }
+.pg-title { font-size: 11.5px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 4px 2px 6px; }
+.perm-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--bg); border-radius: 12px; margin-bottom: 6px; cursor: pointer; }
+.perm-row input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; margin-top: 1px; }
+.perm-row b { display: block; font-size: 14px; font-weight: 600; } .perm-row small { display: block; font-size: 12px; color: var(--muted); }
+.checks label { white-space: nowrap; }

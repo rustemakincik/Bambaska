@@ -18,7 +18,38 @@
   const ST_LABEL = { bitti: 'Bitti', kritik: 'Kritik', azaliyor: 'Azalıyor', iyi: 'Yeterli' };
   const MV_LABEL = { sayim: 'saydı', giris: 'giriş yaptı', cikis: 'çıkış yaptı' };
   const isAdmin = () => user?.role === 'yonetici';
-  const myDepts = () => (isAdmin() || !user.deptIds?.length) ? S.get().depts : S.get().depts.filter(d => user.deptIds.includes(d.id));
+  // ---- roller ve yetkiler: yönetici her şeyi yapar; müdür/personel için kişi bazında işaretlenir
+  const ROLES = [['yonetici', 'Yönetici'], ['mudur', 'Müdür'], ['personel', 'Personel']];
+  const roleName = r => (ROLES.find(x => x[0] === r) || ROLES[2])[1];
+  const PERMS = [
+    ['Sayım ve sipariş', [
+      ['sayim_tum', 'Tüm bölümlerde sayım', 'Kapalıysa sadece aşağıda seçili bölümleri sayar'],
+      ['siparis_hazirla', 'Sipariş hazırlayıp onaya gönderme'],
+      ['siparis_direkt', 'Onaysız sipariş verme', 'Yöneticiye sormadan WhatsApp ile gönderir'],
+      ['siparis_onay', 'Siparişleri onaylama / reddetme'],
+      ['teslim', 'Gelen siparişi teslim alma', 'Gelen ürünü stoğa ekler'],
+    ]],
+    ['Kayıtlar', [
+      ['malzeme', 'Malzeme ekleme / düzenleme', 'Ad, birim, minimum ve hedef miktarlar'],
+      ['tedarikci', 'Tedarikçi ekleme / düzenleme'],
+      ['bolum', 'Bölüm ekleme / düzenleme'],
+    ]],
+    ['Demirbaş', [
+      ['demirbas_durum', 'Demirbaş durumunu değiştirme', 'Arızalı, tamirde, kayıp, aktif…'],
+      ['demirbas_yonet', 'Demirbaş ekleme / düzenleme / etiket yazdırma'],
+    ]],
+    ['Diğer', [
+      ['cihaz', 'Yeni telefon ekleme', '“Cihaz ekle” karekodunu gösterebilir'],
+    ]],
+  ];
+  const PRESET = {
+    mudur: { sayim_tum: 1, siparis_hazirla: 1, teslim: 1, malzeme: 1, tedarikci: 1, bolum: 1, demirbas_durum: 1, demirbas_yonet: 1 },
+    personel: { siparis_hazirla: 1, teslim: 1, demirbas_durum: 1 },
+  };
+  const permsOf = u => u.perms || PRESET[u.role] || PRESET.personel;
+  const can = p => !!user && (user.role === 'yonetici' || !!permsOf(user)[p]);
+  const canAnyRecords = () => can('malzeme') || can('tedarikci') || can('bolum');
+  const myDepts = () => (isAdmin() || can('sayim_tum') || !user.deptIds?.length) ? S.get().depts : S.get().depts.filter(d => user.deptIds.includes(d.id));
 
   function ago(t) {
     const d = (Date.now() - t) / 1000;
@@ -191,7 +222,7 @@
       <main>${view()}</main>
       <nav class="nav">
         ${[['home', 'Özet'], ['stok', 'Stok'], ['sayim', 'Sayım'], ['siparis', 'Sipariş'], ['demirbas', 'Demirbaş']].map(([k, l]) =>
-          `<a href="#/${k}" class="${r === k || (k === 'demirbas' && r === 'd') ? 'on' : ''}">${ICON[k]}${l}${k === 'siparis' && isAdmin() && onayN ? `<span class="pip warn">${onayN}</span>` : k === 'siparis' && crit ? `<span class="pip">${crit}</span>` : ''}</a>`).join('')}
+          `<a href="#/${k}" class="${r === k || (k === 'demirbas' && r === 'd') ? 'on' : ''}">${ICON[k]}${l}${k === 'siparis' && can('siparis_onay') && onayN ? `<span class="pip warn">${onayN}</span>` : k === 'siparis' && crit ? `<span class="pip">${crit}</span>` : ''}</a>`).join('')}
       </nav>`;
     afterRender(r);
   }
@@ -208,7 +239,7 @@
     const hour = now.getHours(), greet = hour < 6 ? 'İyi geceler' : hour < 12 ? 'Günaydın' : hour < 18 ? 'İyi günler' : 'İyi akşamlar';
     const last = lastUserId();
     const users = [...db.users].sort((a, b) => (b.id === last) - (a.id === last));
-    const roleTxt = u => u.role === 'yonetici' ? 'Yönetici' : (u.deptIds || []).map(d => S.dept(d)?.name).filter(Boolean).join(', ') || 'Personel';
+    const roleTxt = u => u.role === 'yonetici' ? 'Yönetici' : roleName(u.role) + ((u.deptIds || []).length ? ' · ' + u.deptIds.map(d => S.dept(d)?.name).filter(Boolean).join(', ') : '');
     const u = loginUser && S.user(loginUser);
     const locked = Date.now() < lockUntil;
     $app.innerHTML = `
@@ -282,7 +313,7 @@
           <a class="btn primary sm" href="#/siparis">Liste</a>
         </div>` : `<div class="alert ok"><div class="big">✓</div><div><b>Tüm stoklar yeterli</b><div class="small muted">Sipariş gerekmiyor</div></div></div>`}
       ${(() => {
-        if (isAdmin()) {
+        if (can('siparis_onay')) {
           const w = db.orders.filter(o => o.status === 'onay');
           return w.length ? `<a href="#/siparis" data-act="go-onay" class="card approve-card">
             <span style="font-size:22px">⏳</span><div style="flex:1"><b>${w.length} sipariş onayını bekliyor</b><div class="small muted">${esc(w.map(o => `${o.createdBy} · ${S.supplier(o.supplierId)?.name || ''}`).join(', '))}</div></div><span class="btn primary sm">İncele</span></a>` : '';
@@ -358,7 +389,7 @@
             <div><span class="badge st-${st}">${ST_LABEL[st]}</span></div></div>
         </button>`;
       }).join('') || '<div class="empty"><div class="e">🔍</div>Eşleşen malzeme yok</div>'}</div>
-      ${isAdmin() ? `<button class="btn block" style="margin-top:12px" data-act="new-item">+ Malzeme ekle</button>` : ''}`;
+      ${can('malzeme') ? `<button class="btn block" style="margin-top:12px" data-act="new-item">+ Malzeme ekle</button>` : ''}`;
   }
 
   // ---------- SAYIM
@@ -421,7 +452,8 @@
     red: { name: 'Reddedildi', tone: 'kritik', icon: '✖️' },
   };
   const LOG_TXT = { olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı' };
-  const visibleOrders = () => S.get().orders.filter(o => isAdmin() || o.createdBy === user.name);
+  const visibleOrders = () => S.get().orders.filter(o => can('siparis_onay') || can('siparis_direkt') || o.createdBy === user.name
+    || (can('teslim') && ['verildi', 'teslim'].includes(o.status)));
   const myNeeds = () => {
     const ds = myDepts().map(d => d.id);
     return S.get().items.filter(i => S.needsOrder(i) && ds.includes(i.deptId));
@@ -446,7 +478,7 @@
 
     if (ui.sipTab !== 'hazir') {
       const list = ui.sipTab === 'onay' ? by(['onay']) : ui.sipTab === 'yolda' ? by(['verildi']) : by(['teslim', 'red']);
-      const empty = { onay: ['✔️', isAdmin() ? 'Onay bekleyen sipariş yok' : 'Onayda bekleyen talebin yok'], yolda: ['🚚', 'Yolda sipariş yok'], gecmis: ['🗂️', 'Geçmiş sipariş yok'] }[ui.sipTab];
+      const empty = { onay: ['✔️', can('siparis_onay') ? 'Onay bekleyen sipariş yok' : 'Onayda bekleyen talebin yok'], yolda: ['🚚', 'Yolda sipariş yok'], gecmis: ['🗂️', 'Geçmiş sipariş yok'] }[ui.sipTab];
       return seg + (list.map(orderCard).join('') || `<div class="empty"><div class="e">${empty[0]}</div>${empty[1]}</div>`);
     }
 
@@ -455,7 +487,8 @@
     need.forEach(it => (groups[it.supplierId || '_'] ||= []).push(it));
     const anySel = need.some(it => draftFor(it).on && draftFor(it).qty > 0);
     return seg + `
-      ${isAdmin() ? '' : `<div class="card small" style="margin-bottom:12px;display:flex;gap:10px;align-items:center"><span style="font-size:20px">📝</span><div>Listeyi kontrol et, gerekirse miktarları değiştir ve <b>yöneticiye onaya gönder</b>.</div></div>`}
+      ${can('siparis_direkt') ? '' : can('siparis_hazirla') ? `<div class="card small" style="margin-bottom:12px;display:flex;gap:10px;align-items:center"><span style="font-size:20px">📝</span><div>Listeyi kontrol et, gerekirse miktarları değiştir ve <b>yöneticiye onaya gönder</b>.</div></div>`
+        : `<div class="card small" style="margin-bottom:12px;display:flex;gap:10px;align-items:center"><span style="font-size:20px">👀</span><div>Eksikleri görebilirsin; sipariş hazırlama yetkin yok.</div></div>`}
       ${Object.entries(groups).map(([sid, its]) => {
       const sup = S.supplier(sid);
       const sel = its.filter(it => draftFor(it).on && draftFor(it).qty > 0).length;
@@ -474,15 +507,15 @@
           </div>`;
         }).join('')}
         <div class="sup-foot">
-          <input class="note-in" data-onote="${sid}" placeholder="${isAdmin() ? 'Not (isteğe bağlı)' : 'Yöneticiye not (isteğe bağlı)'}" value="${esc(ui.orderNotes?.[sid] || '')}">
-          ${isAdmin() ? `
+          <input class="note-in" data-onote="${sid}" placeholder="${can('siparis_direkt') ? 'Not (isteğe bağlı)' : 'Yöneticiye not (isteğe bağlı)'}" value="${esc(ui.orderNotes?.[sid] || '')}">
+          ${can('siparis_direkt') ? `
           <div class="btn-row">
             <button class="btn sm" data-act="copy-order" data-id="${sid}">Kopyala</button>
             ${sup?.phone ? `<button class="btn wa" data-act="wa-order" data-id="${sid}" ${sel ? '' : 'disabled'}>WhatsApp ile gönder</button>`
               : `<button class="btn dark" data-act="mark-order" data-id="${sid}" ${sel ? '' : 'disabled'}>Sipariş verildi</button>`}
           </div>
           ${sup?.phone ? `<button class="btn ghost sm block" style="margin-top:6px" data-act="mark-order" data-id="${sid}">Telefonla verdim, sadece işaretle</button>` : ''}`
-          : `<button class="btn primary block" data-act="request-order" data-id="${sid}" ${sel ? '' : 'disabled'}>Onaya gönder (${sel} kalem)</button>`}
+          : can('siparis_hazirla') ? `<button class="btn primary block" data-act="request-order" data-id="${sid}" ${sel ? '' : 'disabled'}>Onaya gönder (${sel} kalem)</button>` : ''}
         </div>
       </div>`;
     }).join('')}
@@ -510,9 +543,9 @@
       ${o.adminNote ? `<div class="o-note admin"><span>🛡️ Yönetici:</span> ${esc(o.adminNote)}</div>` : ''}
       <div class="sup-foot btn-row">
         <button class="btn sm" data-act="pdf-order" data-id="${o.id}">📄 PDF</button>
-        ${o.status === 'onay' && isAdmin() ? `<button class="btn primary" data-act="review-order" data-id="${o.id}">İncele ve onayla</button>` : ''}
-        ${o.status === 'onay' && !isAdmin() && o.createdBy === user.name ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">Geri çek</button>` : ''}
-        ${o.status === 'verildi' ? `${isAdmin() ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}<button class="btn primary" data-act="receive" data-id="${o.id}">Teslim aldım</button>` : ''}
+        ${o.status === 'onay' && can('siparis_onay') ? `<button class="btn primary" data-act="review-order" data-id="${o.id}">İncele ve onayla</button>` : ''}
+        ${o.status === 'onay' && !can('siparis_onay') && o.createdBy === user.name ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">Geri çek</button>` : ''}
+        ${o.status === 'verildi' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${can('teslim') ? `<button class="btn primary" data-act="receive" data-id="${o.id}">Teslim aldım</button>` : ''}` : ''}
       </div>
     </div>`;
   }
@@ -718,8 +751,7 @@
         </button>`;
       }).join('') || '<div class="empty"><div class="e">🔍</div>Eşleşen demirbaş yok</div>'}</div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn" data-act="labels">🖨️ Etiket yazdır</button>
-        ${isAdmin() ? `<button class="btn primary" data-act="new-asset">+ Demirbaş ekle</button>` : ''}
+        ${can('demirbas_yonet') ? `<button class="btn" data-act="labels">🖨️ Etiket yazdır</button><button class="btn primary" data-act="new-asset">+ Demirbaş ekle</button>` : ''}
       </div>
       <div class="small muted" style="text-align:center;margin-top:10px">Etiketi okutunca eşyanın sayfası açılır: arızalı, tamirde, aktif, hurda olarak güncelleyebilirsin.</div>`;
   }
@@ -750,17 +782,16 @@
       </div>
       ${info.length ? `<div class="info-grid">${info.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join('')}</div>` : ''}
       ${a.note ? `<div class="card small" style="margin-top:10px;box-shadow:none;background:var(--bg)">📝 ${esc(a.note)}</div>` : ''}
-      <h2 class="section">Hızlı işlem</h2>
+      ${can('demirbas_durum') ? `<h2 class="section">Hızlı işlem</h2>
       <div class="quick">${(QUICK[a.status] || []).map(([to, label, note]) => `<button class="st-${AST(to).tone}" data-q="${to}" data-note="${esc(note)}">${label}<small>→ ${AST(to).name}</small></button>`).join('')}</div>
       <label class="field" style="margin-top:12px"><span>Not ekle (isteğe bağlı)</span><input id="stNote" placeholder="örn. ekranda çizgi var, X servisine verildi"></label>
       <details class="more"><summary>Başka bir duruma al</summary>
         <div class="status-pick" style="margin-top:10px">${S.ASSET_STATUS.map(s => `<button class="st-${s.tone} ${a.status === s.id ? 'on' : ''}" data-st="${s.id}">${s.name}</button>`).join('')}</div>
-      </details>
+      </details>` : `<div class="card small" style="margin-top:12px;box-shadow:none;background:var(--bg)">Durumu değiştirme yetkin yok. Arızayı yöneticiye ya da müdüre bildir.</div>`}
       <h2 class="section">Geçmiş</h2>
       <div class="list">${log.map(l => `<div class="row"><div class="main"><div class="t" style="font-weight:500">${l.from ? `${AST(l.from).name} → <b>${AST(l.to).name}</b>` : esc(l.note)}</div><div class="s">${esc(l.user)} · ${ago(l.at)}${l.from && l.note ? ' · ' + esc(l.note) : ''}</div></div></div>`).join('') || '<div class="empty small">Kayıt yok</div>'}</div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn sm" data-act="labels-one" data-id="${a.id}">🖨️ Etiket yazdır</button>
-        ${isAdmin() ? `<button class="btn sm" id="editA">✏️ Bilgileri düzenle</button>` : ''}
+        ${can('demirbas_yonet') ? `<button class="btn sm" data-act="labels-one" data-id="${a.id}">🖨️ Etiket yazdır</button><button class="btn sm" id="editA">✏️ Bilgileri düzenle</button>` : ''}
       </div>`,
       sh => {
         const apply = (to, autoNote) => {
@@ -935,7 +966,7 @@
       <div class="card stack">
         <div style="display:flex;gap:10px;align-items:center"><span class="sync-dot s-${cls}"></span><div style="flex:1"><b>${t}</b>
           <div class="small muted">${st.msg ? esc(st.msg) : st.last ? 'Son eşitleme: ' + ago(st.last) : 'Kafe kodu: ' + esc(c.cafeId)}</div></div></div>
-        ${isAdmin() ? `<button class="btn primary block" data-act="cloud-add">📱 Cihaz ekle (karekod / bağlantı)</button>` : ''}
+        ${can('cihaz') ? `<button class="btn primary block" data-act="cloud-add">📱 Cihaz ekle (karekod / bağlantı)</button>` : ''}
         <div class="btn-row"><button class="btn sm" data-act="cloud-push">Şimdi eşitle</button><button class="btn ghost sm" data-act="cloud-leave">Bu cihazı ayır</button></div>
       </div>`;
   }
@@ -1039,32 +1070,41 @@
     const db = S.get();
     const profile = `<div class="card" style="display:flex;align-items:center;gap:12px">
         <div class="avatar" style="width:46px;height:46px">${esc(initials(user.name))}</div>
-        <div style="flex:1"><b>${esc(user.name)}</b><div class="small muted">${isAdmin() ? 'Yönetici' : 'Personel · ' + esc(myDepts().map(d => d.name).join(', '))}</div></div>
+        <div style="flex:1"><b>${esc(user.name)}</b><div class="small muted">${roleName(user.role)}${isAdmin() ? '' : ' · ' + esc(myDepts().map(d => d.name).join(', '))}</div></div>
         <button class="btn sm" data-act="logout">Çıkış</button></div>`;
     const cur = getSkin();
     const themes = `<h2 class="section">Tema</h2>
       <div class="skins">${SKINS.map(t => `<button class="skin ${cur === t.id ? 'on' : ''}" data-act="skin" data-id="${t.id}">
         <span class="sw"><i style="background:${t.c[0]}"></i><i style="background:${t.c[1]}"></i><i style="background:${t.c[2]}"></i></span>
         <b>${t.name}</b>${t.d ? `<small>${t.d}</small>` : ''}</button>`).join('')}</div>`;
-    if (!isAdmin()) return profile + cloudSection() + themes + `<div class="empty small">Malzeme ve kullanıcı ayarlarını yönetici değiştirebilir.</div>`;
     const sec = (title, act, rows) => `<h2 class="section">${title}</h2><div class="list">${rows}<button class="row" data-act="${act}" style="color:var(--accent);font-weight:700">+ Ekle</button></div>`;
-    return profile + cloudSection() + themes + `
+    let out = profile + cloudSection();
+    if (isAdmin()) out += `
       <h2 class="section">Kafe</h2>
       <div class="list"><button class="row" data-act="edit-cafe">
         <div class="cafe-thumb">${db.cafe.logo ? `<img src="${db.cafe.logo}" alt="">` : '☕'}</div>
         <div class="main"><div class="t">${esc(db.cafe.name)}</div><div class="s">Logo ve isim · ${CAFE_MODES.find(x => x[0] === cafeMode())[1]}</div></div><span class="muted">›</span></button></div>
-      ${sec('Malzemeler', 'new-item', db.depts.map(d => {
-        const n = db.items.filter(i => i.deptId === d.id).length;
-        return `<button class="row" data-act="manage-items" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div><div class="s">${n} malzeme</div></div><span class="muted">›</span></button>`;
-      }).join(''))}
-      ${sec('Bölümler', 'new-dept', db.depts.map(d => `<button class="row" data-act="edit-dept" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div></div><span class="muted">›</span></button>`).join(''))}
-      ${sec('Tedarikçiler', 'new-sup', db.suppliers.map(s => `<button class="row" data-act="edit-sup" data-id="${s.id}"><div class="main"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.contact || '')} ${s.phone ? '· +' + esc(s.phone) : ''}</div></div><span class="muted">›</span></button>`).join(''))}
-      ${sec('Kullanıcılar', 'new-user', db.users.map(u => `<button class="row" data-act="edit-user" data-id="${u.id}"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)}</div><div class="s">${u.role === 'yonetici' ? 'Yönetici' : 'Personel · ' + esc((u.deptIds || []).map(d => S.dept(d)?.name).join(', ') || 'tüm bölümler')}</div></div><span class="muted">›</span></button>`).join(''))}
+      ${sec('Kullanıcılar ve yetkiler', 'new-user', db.users.map(u => `<button class="row" data-act="edit-user" data-id="${u.id}"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)} <span class="role-tag r-${u.role}">${roleName(u.role)}</span></div><div class="s">${u.role === 'yonetici' ? 'Tüm yetkiler' : esc(permSummary(u))}</div></div><span class="muted">›</span></button>`).join(''))}`;
+    if (can('malzeme')) out += sec('Malzemeler', 'new-item', db.depts.map(d => {
+      const n = db.items.filter(i => i.deptId === d.id).length;
+      return `<button class="row" data-act="manage-items" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div><div class="s">${n} malzeme</div></div><span class="muted">›</span></button>`;
+    }).join(''));
+    if (can('tedarikci')) out += sec('Tedarikçiler', 'new-sup', db.suppliers.map(s => `<button class="row" data-act="edit-sup" data-id="${s.id}"><div class="main"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.contact || '')} ${s.phone ? '· +' + esc(s.phone) : ''}</div></div><span class="muted">›</span></button>`).join(''));
+    if (can('bolum')) out += sec('Bölümler', 'new-dept', db.depts.map(d => `<button class="row" data-act="edit-dept" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div></div><span class="muted">›</span></button>`).join(''));
+    out += themes;
+    if (isAdmin()) out += `
       <h2 class="section">Veri</h2>
       <div class="card stack small">
-        <div><span class="sync" style="opacity:1"><i></i></span> Veriler şu an <b>sadece bu cihazda</b>. Çok cihaz senkronu bir sonraki aşamada bulut ile bağlanacak.</div>
-        <div class="btn-row"><button class="btn sm" data-act="export">Yedek indir</button><button class="btn danger sm" data-act="reset">Demo veriye dön</button></div>
+        <div>Tüm verileri (malzeme, sipariş, demirbaş, geçmiş) tek dosya olarak telefona indirir.</div>
+        <div class="btn-row"><button class="btn sm" data-act="export">Yedek indir</button>${Sync.cloud ? '' : `<button class="btn danger sm" data-act="reset">Demo veriye dön</button>`}</div>
       </div>`;
+    if (!isAdmin() && !canAnyRecords()) out += `<div class="empty small">Malzeme, tedarikçi ve kullanıcı ayarlarını yetkili kişiler değiştirebilir.</div>`;
+    return out;
+  }
+  function permSummary(u) {
+    const p = permsOf(u), on = PERMS.flatMap(g => g[1]).filter(x => p[x[0]]);
+    const depts = (u.deptIds || []).map(d => S.dept(d)?.name).filter(Boolean);
+    return [depts.length && !p.sayim_tum ? 'Sayım: ' + depts.join(', ') : p.sayim_tum ? 'Tüm bölümler' : '', `${on.length} yetki`].filter(Boolean).join(' · ');
   }
 
   // ---------- alt sayfa (sheet)
@@ -1090,7 +1130,7 @@
     const it = S.item(id); if (!it) return;
     const st = S.status(it), dept = S.dept(it.deptId), sup = S.supplier(it.supplierId);
     const hist = S.get().movements.filter(m => m.itemId === id).slice(0, 5);
-    const canCount = isAdmin() || myDepts().some(d => d.id === it.deptId);
+    const canCount = myDepts().some(d => d.id === it.deptId);
     let v = it.qty;
     sheet(`
       <h3>${esc(it.name)}</h3>
@@ -1101,7 +1141,7 @@
       <button class="btn primary block" id="saveItem">Kaydet</button>` : `<div class="card small muted">Bu bölümün sayımını sadece ilgili personel yapabilir.</div>`}
       <h2 class="section">Geçmiş</h2>
       <div class="list">${hist.map(m => `<div class="row"><div class="main"><div class="t" style="font-weight:500">${esc(m.user)} ${MV_LABEL[m.type]}</div><div class="s">${ago(m.at)}${m.note ? ' · ' + esc(m.note) : ''}</div></div><div class="qty small"><span class="muted">${fmt(m.before)} →</span> <b>${fmt(m.after)}</b></div></div>`).join('') || '<div class="empty small">Kayıt yok</div>'}</div>
-      ${isAdmin() ? `<button class="btn ghost block" style="margin-top:10px" id="editItem">Malzemeyi düzenle</button>` : ''}`,
+      ${can('malzeme') ? `<button class="btn ghost block" style="margin-top:10px" id="editItem">Malzemeyi düzenle</button>` : ''}`,
       sh => {
         const inp = sh.querySelector('#bigQ');
         sh.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { v = Math.max(0, num(inp.value) + stepOf(it) * b.dataset.s); inp.value = fmt(v); });
@@ -1172,13 +1212,54 @@
   const editSup = id => form(id ? 'Tedarikçiyi düzenle' : 'Yeni tedarikçi', [{ k: 'name', label: 'Firma adı', req: true }, { k: 'contact', label: 'Yetkili' }, { k: 'phone', label: 'WhatsApp numarası', type: 'tel', ph: '905xxxxxxxxx' }],
     id ? S.supplier(id) : {}, v => { v.phone = v.phone.replace(/\D/g, '').replace(/^0/, '90'); S.upsert('suppliers', { ...v, id: id || undefined }); },
     id ? () => S.remove('suppliers', id) : null);
-  const editUser = id => form(id ? 'Kullanıcıyı düzenle' : 'Yeni kullanıcı', [
-    { k: 'name', label: 'Adı', req: true }, [{ k: 'role', label: 'Rol', type: 'select', options: [['personel', 'Personel'], ['yonetici', 'Yönetici']] }, { k: 'pin', label: '4 haneli PIN', type: 'tel', req: true }],
-    { k: 'deptIds', label: 'Sayım yapabileceği bölümler (personel)', type: 'checks', options: S.get().depts.map(d => [d.id, d.icon + ' ' + d.name]) },
-  ], id ? S.user(id) : { role: 'personel', deptIds: [] }, v => {
-    if (!/^\d{4}$/.test(v.pin)) return toast('PIN 4 rakam olmalı');
-    S.upsert('users', { ...v, id: id || undefined });
-  }, id && id !== user.id ? () => S.remove('users', id) : null);
+  function editUser(id) {
+    const db = S.get(), u = id ? { ...S.user(id) } : { role: 'personel', deptIds: [], pin: '' };
+    let role = u.role, perms = { ...permsOf(u) };
+    const admins = db.users.filter(x => x.role === 'yonetici');
+    const lastAdmin = id && u.role === 'yonetici' && admins.length === 1;
+    sheet(`
+      <h3>${id ? esc(u.name) : 'Yeni kullanıcı'}</h3><div class="sub">Rolü seç, sonra bu kişinin neler yapabileceğini işaretle</div>
+      <div class="field-row" style="grid-template-columns:2fr 1fr">
+        <label class="field"><span>Adı</span><input id="uName" value="${esc(u.name || '')}" placeholder="örn. Mahmut Şahin"></label>
+        <label class="field"><span>PIN (4 rakam)</span><input id="uPin" inputmode="numeric" maxlength="4" value="${esc(u.pin || '')}"></label>
+      </div>
+      <div class="field"><span>Rol</span><div class="seg" id="uRole" style="margin:0">${ROLES.map(([k, l]) => `<button type="button" data-r="${k}">${l}</button>`).join('')}</div>
+        <div class="small muted" id="uRoleHint" style="margin-top:6px"></div></div>
+      <div id="uPermBox"></div>
+      <div class="field"><span>Sayım yapabileceği bölümler</span><div class="checks" id="uDepts">${db.depts.map(d => `<label><input type="checkbox" value="${d.id}" ${(u.deptIds || []).includes(d.id) ? 'checked' : ''}> ${d.icon} ${esc(d.name)}</label>`).join('')}</div></div>
+      <div class="small muted" id="uMsg" style="margin-bottom:8px"></div>
+      <button class="btn primary block" id="uSave">Kaydet</button>
+      ${id && id !== user.id && !lastAdmin ? `<button class="btn ghost block" id="uDel" style="margin-top:6px;color:var(--bad)">Kullanıcıyı sil</button>` : ''}`,
+      sh => {
+        const draw = () => {
+          sh.querySelectorAll('#uRole [data-r]').forEach(b => { b.classList.toggle('on', b.dataset.r === role); b.disabled = lastAdmin && b.dataset.r !== 'yonetici'; });
+          sh.querySelector('#uRoleHint').textContent = role === 'yonetici' ? 'Yönetici her şeyi yapabilir: onaylar, kullanıcılar, kafe ve bulut ayarları.'
+            : lastAdmin ? '' : role === 'mudur' ? 'Müdür için önerilen yetkiler işaretlendi; istediğini değiştir.' : 'Personel için önerilen yetkiler işaretlendi; istediğini değiştir.';
+          if (lastAdmin) sh.querySelector('#uRoleHint').textContent = 'Tek yönetici bu kişi; rolü değiştirilemez.';
+          sh.querySelector('#uPermBox').innerHTML = role === 'yonetici' ? '' : PERMS.map(([g, list]) => `
+            <div class="perm-group"><div class="pg-title">${g}</div>${list.map(([k, l, d]) => `
+              <label class="perm-row"><input type="checkbox" data-p="${k}" ${perms[k] ? 'checked' : ''}><div><b>${l}</b>${d ? `<small>${d}</small>` : ''}</div></label>`).join('')}</div>`).join('');
+          sh.querySelectorAll('[data-p]').forEach(c => c.onchange = () => { if (c.checked) perms[c.dataset.p] = 1; else delete perms[c.dataset.p]; });
+        };
+        sh.querySelectorAll('#uRole [data-r]').forEach(b => b.onclick = () => {
+          if (b.dataset.r === role) return;
+          role = b.dataset.r; perms = { ...(PRESET[role] || {}) }; draw();
+        });
+        sh.querySelector('#uSave').onclick = () => {
+          const name = sh.querySelector('#uName').value.trim(), pin = sh.querySelector('#uPin').value.trim(), msg = sh.querySelector('#uMsg');
+          if (!name) return (msg.textContent = '⚠️ Ad boş olamaz');
+          if (!/^\d{4}$/.test(pin)) return (msg.textContent = '⚠️ PIN 4 rakam olmalı');
+          if (db.users.some(x => x.id !== id && x.name.toLocaleLowerCase('tr') === name.toLocaleLowerCase('tr'))) return (msg.textContent = '⚠️ Bu isimde bir kullanıcı zaten var');
+          const deptIds = [...sh.querySelectorAll('#uDepts input:checked')].map(c => c.value);
+          const rec = { name, pin, role, deptIds, perms: role === 'yonetici' ? {} : perms };
+          if (id) rec.id = id;
+          S.upsert('users', rec);
+          closeSheet(); render(); toast(`${name} kaydedildi · ${roleName(role)}`);
+        };
+        sh.querySelector('#uDel')?.addEventListener('click', () => { if (confirm(`${u.name} silinsin mi?`)) { S.remove('users', id); closeSheet(); render(); } });
+        draw();
+      });
+  }
 
   function receiveSheet(oid) {
     const o = S.get().orders.find(x => x.id === oid), sup = S.supplier(o.supplierId);
