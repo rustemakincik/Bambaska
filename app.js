@@ -1461,7 +1461,9 @@
         catch (e) {
             btn.disabled = false;
             btn.textContent = 'Tekrar dene';
-            msg.textContent = '⚠️ Katılamadı: ' + (/permission/i.test(String(e.code || e.message)) ? 'kod geçersiz ya da kafe silinmiş' : (e.code || e.message || e));
+            const m = String(e.code || e.message || e);
+            msg.textContent = '⚠️ ' + (/eski-tarayici/.test(m) ? 'Bu cihaz çok eski: bulut bağlantısı için iOS 11.3 veya üstü gerekiyor. Uygulama bu cihazda sadece demo olarak açılır.'
+                : 'Katılamadı: ' + (/permission/i.test(m) ? 'kod geçersiz ya da kafe silinmiş' : m));
         }
     }
     // ---------- BİLDİRİMLER

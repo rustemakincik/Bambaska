@@ -117,6 +117,8 @@ const Sync = (() => {
     }
     const errText = e => {
         const m = String((e === null || e === void 0 ? void 0 : e.code) || (e === null || e === void 0 ? void 0 : e.message) || e);
+        if (/eski-tarayici/.test(m))
+            return 'Bu cihazın tarayıcısı çok eski (iOS 11.3 ve üstü gerekir); bulut bağlantısı kurulamıyor';
         if (/permission/i.test(m))
             return 'Yetki yok: bu cihaz kafeye bağlı değil ya da Firestore kuralları eksik';
         if (/network|unavailable|failed to fetch/i.test(m))
@@ -137,7 +139,11 @@ const Sync = (() => {
             setState({ status: st, msg: err ? errText(err) : '' });
     }
     async function loadBackend(c) {
-        const mod = c.type === 'mock' ? await import('./mock-backend.js') : await import('./firebase-backend.js');
+        // eski tarayıcılarda "import(...)" yazımı sayfayı tamamen bozar; bu yüzden metin olarak kurulur
+        if (!window.__canImport)
+            throw new Error('eski-tarayici');
+        const load = new Function('u', 'return import(u)');
+        const mod = await load(new URL(c.type === 'mock' ? 'mock-backend.js' : 'firebase-backend.js', document.baseURI).href);
         return mod.create(c);
     }
     async function start() {
