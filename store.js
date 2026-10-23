@@ -41,7 +41,7 @@ const Store = (() => {
         const suppliers = [
             { id: 's1', name: 'Tütün Toptancısı', contact: 'Ahmet Bey', phone: '905321112233' },
             { id: 's2', name: 'Kömür Bayii', contact: 'Hasan', phone: '905334445566' },
-            { id: 's3', name: 'Toptan Market', contact: 'Sipariş hattı', phone: '905057778899' },
+            { id: 's3', name: 'Toptan Market', contact: 'Sipariş hattı', phone: '905057778899', mode: 'pickup' },
             { id: 's4', name: 'Süt & Fırın', contact: 'Kemal', phone: '905441234567' },
         ];
         const I = (deptId, name, unit, qty, min, target, supplierId) => ({ id: uid(), deptId, name, unit, qty, min, target, supplierId, updatedAt: t - Math.random() * 2 * D, updatedBy: 'Mehmet' });
@@ -339,9 +339,9 @@ const Store = (() => {
             commit();
         },
         // sipariş
-        pendingQtyFor(itemId, statuses = ['onay', 'tedarik', 'verildi']) {
+        pendingQtyFor(itemId, statuses = ['onay', 'tedarik', 'verildi', 'alisveris']) {
             return db.orders.filter(o => statuses.includes(o.status))
-                .reduce((s, o) => { const l = o.lines.find(x => x.itemId === itemId); return s + (l ? (o.status === 'verildi' ? lineLeft(l) : l.qty) : 0); }, 0);
+                .reduce((s, o) => { const l = o.lines.find(x => x.itemId === itemId); return s + (l ? (o.status === 'verildi' || o.status === 'alisveris' ? lineLeft(l) : l.qty) : 0); }, 0);
         },
         nextOrderNo() {
             const max = db.orders.reduce((m, o) => Math.max(m, parseInt(String(o.no || '').replace(/\D/g, '')) || 0), 0);
@@ -402,6 +402,19 @@ const Store = (() => {
                 return this.supplierFail(id, user, r.note || 'Tedarikçide ürün yok');
             Object.assign(o, { status: 'verildi', confirmedBy: user, confirmedAt: now(), eta: r.eta || null, supplierReply: r.note || '' });
             o.log.push({ at: now(), user, action: 'tedarikci_onay', eta: r.eta || null, note: r.note || '', partial: o.lines.some(l => l.asked != null) || !!cut.length });
+            commit();
+            return o;
+        },
+        // tedarikçi getirmiyor / market alışverişi: listeyi bir personele ata, o gidip alsın
+        assignShopper(id, user, a = {}) {
+            const o = this.order(id);
+            if (!o || !a.to)
+                return;
+            const re = o.status === 'alisveris';
+            Object.assign(o, { status: 'alisveris', shopper: a.to, shopNote: a.note || '', shopDue: a.due || null, assignedBy: user, assignedAt: now() });
+            if (!o.approvedBy)
+                Object.assign(o, { approvedBy: user, approvedAt: now() });
+            o.log.push({ at: now(), user, action: re ? 'yeniden_atadi' : 'atadi', to: a.to, note: a.note || '' });
             commit();
             return o;
         },
@@ -518,10 +531,12 @@ const Store = (() => {
         // Teslim alma. rec: {itemId: sayı | {qty, reason, note}}
         //  reason: 'eksik' (eksik geldi) | 'begenmedim' (iade) | 'hasarli' (iade)
         //  keepOpen: eksik kalan miktar sonra gelecek → sipariş "yolda" kalır, sadece kalan bekler
-        receiveOrder(orderId, rec, user, keepOpen = false) {
+        receiveOrder(orderId, rec, user, keepOpen = false, extra = {}) {
             const o = db.orders.find(x => x.id === orderId);
             if (!o)
                 return;
+            if (extra.spent)
+                o.spent = (Number(o.spent) || 0) + Number(extra.spent);
             let short = false;
             o.lines.forEach(l => {
                 var _a;
@@ -551,10 +566,12 @@ const Store = (() => {
                 (o.log || (o.log = [])).push({ at: now(), user, action: 'kismi_teslim' });
             }
             else {
+                if (o.status === 'alisveris')
+                    o.bought = true;
                 o.status = 'teslim';
                 o.receivedAt = now();
                 o.receivedBy = user;
-                (o.log || (o.log = [])).push({ at: now(), user, action: 'teslim_aldi', short: !!o.short });
+                (o.log || (o.log = [])).push({ at: now(), user, action: 'teslim_aldi', short: !!o.short, spent: extra.spent || 0 });
             }
             commit();
             return o;
@@ -568,6 +585,8 @@ const Store = (() => {
                 (l.issues || (l.issues = [])).push({ qty: left, reason: 'gelmedi', note: '', by: user, at: now() });
                 l.closed = true;
             } });
+            if (o.status === 'alisveris')
+                o.bought = true;
             Object.assign(o, { status: 'teslim', short: true, receivedAt: now(), receivedBy: user });
             (o.log || (o.log = [])).push({ at: now(), user, action: 'teslim_aldi', short: true });
             commit();

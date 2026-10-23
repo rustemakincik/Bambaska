@@ -74,7 +74,7 @@
   }
   // ilerleme çubuğu: düz = elde, taralı = siparişte (yolda / onayda), kesik çizgili = hazırlanan taslak
   function bar(it, big = false, draft = 0) {
-    const onay = S.pendingQtyFor(it.id, ['onay', 'tedarik']), yol = S.pendingQtyFor(it.id, ['verildi']);
+    const onay = S.pendingQtyFor(it.id, ['onay', 'tedarik']), yol = S.pendingQtyFor(it.id, ['verildi', 'alisveris']);
     const max = Math.max(it.target, it.qty + onay + yol + draft, 1);
     const st = S.status(it), w = x => Math.min(100, x / max * 100);
     return `<div class="bar ${big ? 'bar-big' : ''}"><span class="st-${st}" style="width:${w(it.qty)}%"></span>${yol ? `<span class="seg-yol" style="width:${w(yol)}%"></span>` : ''}${onay ? `<span class="seg-onay" style="width:${w(onay)}%"></span>` : ''}${draft ? `<span class="seg-draft" style="width:${w(draft)}%"></span>` : ''}<em style="left:${w(it.min)}%"></em>${big ? `<i class="tgt" style="left:calc(${w(it.target)}% - 2px)"></i>` : ''}</div>`;
@@ -447,7 +447,7 @@
   function viewHome() {
     const db = S.get();
     const crit = myNeeds();
-    const enRoute = db.orders.filter(o => o.status === 'verildi');
+    const enRoute = db.orders.filter(o => o.status === 'verildi' || (o.status === 'alisveris' && !isShopper(o)));
     const greet = new Date().getHours() < 12 ? 'Günaydın' : new Date().getHours() < 18 ? 'İyi günler' : 'İyi akşamlar';
     return `
       ${onboardCard()}
@@ -459,16 +459,19 @@
           <a class="btn primary sm" href="#/siparis">Liste</a>
         </div>` : `<div class="alert ok"><div class="big">✓</div><div><b>Tüm stoklar yeterli</b><div class="small muted">Sipariş gerekmiyor</div></div></div>`}
       ${(() => {
+        const sw = db.orders.filter(o => isShopper(o));
+        const scard = sw.map(o => `<a href="#/siparis" data-act="go-yolda" class="card approve-card" style="margin-top:10px">
+            <span style="font-size:22px">🛒</span><div style="flex:1"><b>Alışveriş listen: ${esc(o.no)}</b><div class="small muted">${esc(S.supplier(o.supplierId)?.name || '')} · ${o.lines.filter(l => S.lineLeft(l) > 0).length} kalem${o.shopDue ? ' · ' + etaTxt(o.shopDue) : ''}${o.shopNote ? ' · ' + esc(o.shopNote) : ''}</div></div><span class="btn primary sm">Aç</span></a>`).join('');
         const tw = db.orders.filter(o => o.status === 'tedarik' && canContact(o) && (!isAdmin() || !contactors(o).length || o.contacts?.length));
         const tcard = tw.length ? `<a href="#/siparis" data-act="go-tedarik" class="card approve-card" style="margin-top:10px">
             <span style="font-size:22px">📞</span><div style="flex:1"><b>${tw.length} sipariş tedarikçiye iletilecek</b><div class="small muted">${esc(tw.map(o => `${o.no} · ${S.supplier(o.supplierId)?.name || ''}${o.contacts?.length ? ' (cevap bekleniyor)' : ''}`).join(', '))}</div></div><span class="btn primary sm">Aç</span></a>` : '';
         if (can('siparis_onay')) {
           const w = db.orders.filter(o => o.status === 'onay');
           return w.length ? `<a href="#/siparis" data-act="go-onay" class="card approve-card">
-            <span style="font-size:22px">⏳</span><div style="flex:1"><b>${w.length} sipariş onayını bekliyor</b><div class="small muted">${esc(w.map(o => `${o.createdBy} · ${S.supplier(o.supplierId)?.name || ''}`).join(', '))}</div></div><span class="btn primary sm">İncele</span></a>` + tcard : tcard;
+            <span style="font-size:22px">⏳</span><div style="flex:1"><b>${w.length} sipariş onayını bekliyor</b><div class="small muted">${esc(w.map(o => `${o.createdBy} · ${S.supplier(o.supplierId)?.name || ''}`).join(', '))}</div></div><span class="btn primary sm">İncele</span></a>` + scard + tcard : scard + tcard;
         }
         const mine = db.orders.filter(o => isMine(o) && ['onay', 'red', 'yok', 'tedarik'].includes(o.status) && !(o.status === 'tedarik' && canContact(o)) || (isMine(o) && o.status === 'verildi' && o.approvedBy !== user.name && Date.now() - (o.approvedAt || 0) < 864e5)).slice(0, 3);
-        return tcard + mine.map(o => { const st = OST[o.status]; return `<a href="#/siparis" data-act="go-${o.status === 'onay' ? 'onay' : ['red', 'yok'].includes(o.status) ? 'gecmis' : o.status === 'tedarik' ? 'tedarik' : 'yolda'}" class="card" style="display:flex;align-items:center;gap:10px;margin-top:10px;text-decoration:none;color:inherit">
+        return scard + tcard + mine.map(o => { const st = OST[o.status]; return `<a href="#/siparis" data-act="go-${o.status === 'onay' ? 'onay' : ['red', 'yok'].includes(o.status) ? 'gecmis' : o.status === 'tedarik' ? 'tedarik' : 'yolda'}" class="card" style="display:flex;align-items:center;gap:10px;margin-top:10px;text-decoration:none;color:inherit">
           <span style="font-size:22px">${st.icon}</span><div style="flex:1;min-width:0"><b>${esc(o.no)} · ${esc(S.supplier(o.supplierId)?.name || '')}</b><div class="small muted">${o.adminNote ? '🛡️ ' + esc(o.adminNote) : `${o.lines.length} kalem`}</div></div><span class="badge st-${st.tone}">${st.name}</span></a>`; }).join('');
       })()}
       ${enRoute.length ? `<a href="#/siparis" data-act="go-yolda" class="card" style="display:flex;align-items:center;gap:10px;margin-top:10px;text-decoration:none;color:inherit">
@@ -606,6 +609,7 @@
     tedarik: { name: 'Tedarikçiye iletilecek', tone: 'azaliyor', icon: '📞' },
     verildi: { name: 'Tedarikçi onayladı · yolda', tone: 'iyi', icon: '🚚' },
     yok: { name: 'Tedarikçi karşılayamadı', tone: 'kritik', icon: '🚫' },
+    alisveris: { name: 'Alışverişte', tone: 'iyi', icon: '🛒' },
     teslim: { name: 'Teslim alındı', tone: 'pasif', icon: '✅' },
     red: { name: 'Reddedildi', tone: 'kritik', icon: '✖️' },
   };
@@ -622,7 +626,9 @@
     const m = new Map(); S.partsOf(o, l).forEach(p => m.set(p.by, (m.get(p.by) || 0) + p.qty));
     return m.size > 1 ? [...m].map(([n, q]) => `${n} ${fmt(q)}`).join(' · ') : [...m.keys()][0];
   };
-  const LOG_TXT = { ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı', kismi_teslim: 'kısmen teslim aldı', iletti: 'tedarikçiye iletti', tedarikci_onay: 'tedarikçi onayını girdi', tedarikci_yok: 'tedarikçi karşılayamadı dedi' };
+  const LOG_TXT = { ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı', kismi_teslim: 'kısmen teslim aldı', iletti: 'tedarikçiye iletti', tedarikci_onay: 'tedarikçi onayını girdi', tedarikci_yok: 'tedarikçi karşılayamadı dedi', atadi: 'alışverişe atadı', yeniden_atadi: 'alışverişi başkasına atadı' };
+  const isShopper = o => o.status === 'alisveris' && o.shopper === user?.name;
+  const canReceive = o => !readOnly() && (can('teslim') || isShopper(o));
   // tedarikçiyle iletişim: yönetici her zaman; müdür/personel yetkiyle (personel sadece kendi bölümünün kalemleri olan siparişlerde)
   const canContact = o => {
     if (!user || readOnly()) return false;
@@ -637,7 +643,7 @@
   const etaTxt = t => { if (!t) return ''; const d = new Date(t), n = new Date(); n.setHours(0, 0, 0, 0); const diff = Math.round((new Date(d).setHours(0, 0, 0, 0) - n) / 864e5);
     return diff === 0 ? 'bugün' : diff === 1 ? 'yarın' : diff === -1 ? 'dün' : d.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'short' }); };
   const visibleOrders = () => S.get().orders.filter(o => viewAll() || can('siparis_onay') || can('siparis_direkt') || isMine(o)
-    || (can('teslim') && ['verildi', 'teslim'].includes(o.status)) || (o.status !== 'onay' && canContact(o)));
+    || (can('teslim') && ['verildi', 'alisveris', 'teslim'].includes(o.status)) || o.shopper === user.name || (o.status !== 'onay' && canContact(o)));
   const myNeeds = () => {
     const ds = myDepts().map(d => d.id);
     return S.get().items.filter(i => S.needsOrder(i) && ds.includes(i.deptId));
@@ -649,7 +655,7 @@
     return ui.orderDraft[it.id];
   }
   function pendLabel(itId) {
-    const onay = S.pendingQtyFor(itId, ['onay']), ilet = S.pendingQtyFor(itId, ['tedarik']), yol = S.pendingQtyFor(itId, ['verildi']);
+    const onay = S.pendingQtyFor(itId, ['onay']), ilet = S.pendingQtyFor(itId, ['tedarik']), yol = S.pendingQtyFor(itId, ['verildi', 'alisveris']);
     return (onay ? ` · <span class="pending p-onay">onayda ${fmt(onay)}</span>` : '') + (ilet ? ` · <span class="pending p-onay">iletilecek ${fmt(ilet)}</span>` : '') + (yol ? ` · <span class="pending p-yol">yolda ${fmt(yol)}</span>` : '');
   }
 
@@ -657,11 +663,11 @@
     const os = visibleOrders();
     const need = myNeeds();
     const by = st => os.filter(o => st.includes(o.status));
-    const tabs = [['hazir', 'Hazırla', need.length], ['onay', 'Onay', by(['onay']).length], ['tedarik', 'Tedarikçi', by(['tedarik']).length], ['yolda', 'Yolda', by(['verildi']).length], ['gecmis', 'Geçmiş', 0]];
+    const tabs = [['hazir', 'Hazırla', need.length], ['onay', 'Onay', by(['onay']).length], ['tedarik', 'Tedarikçi', by(['tedarik']).length], ['yolda', 'Yolda', by(['verildi', 'alisveris']).length], ['gecmis', 'Geçmiş', 0]];
     const seg = `<div class="seg seg5">${tabs.map(([k, l, n]) => `<button class="${ui.sipTab === k ? 'on' : ''}" data-act="sip-tab" data-id="${k}">${l}${n ? ` <span class="seg-n ${k === 'onay' || k === 'tedarik' ? 'warn' : ''}">${n}</span>` : ''}</button>`).join('')}</div>`;
 
     if (ui.sipTab !== 'hazir') {
-      const list = ui.sipTab === 'onay' ? by(['onay']) : ui.sipTab === 'tedarik' ? by(['tedarik']) : ui.sipTab === 'yolda' ? by(['verildi']) : by(['teslim', 'red', 'yok']);
+      const list = ui.sipTab === 'onay' ? by(['onay']) : ui.sipTab === 'tedarik' ? by(['tedarik']) : ui.sipTab === 'yolda' ? by(['alisveris', 'verildi']) : by(['teslim', 'red', 'yok']);
       const empty = { onay: ['✔️', can('siparis_onay') ? 'Onay bekleyen sipariş yok' : 'Onayda bekleyen talebin yok'], tedarik: ['📞', 'Tedarikçiye iletilecek sipariş yok'], yolda: ['🚚', 'Yolda sipariş yok'], gecmis: ['🗂️', 'Geçmiş sipariş yok'] }[ui.sipTab];
       return seg + (list.map(orderCard).join('') || `<div class="empty"><div class="e">${empty[0]}</div>${empty[1]}</div>`);
     }
@@ -717,21 +723,25 @@
     const got = l.received || 0, left = o.status === 'verildi' ? S.lineLeft(l) : 0;
     if (!iss.length && !left && got === l.qty) return `<b>${fmt(got)} ${u}</b>`;
     return `<div class="lq"><b>${fmt(got)} / ${fmt(l.qty)} ${u}</b>
-      ${iss.map(x => `<span class="iss iss-${x.reason}">${fmt(x.qty)} ${RSN[x.reason] || x.reason}${x.note ? ' · ' + esc(x.note) : ''}</span>`).join('')}
+      ${iss.map(x => `<span class="iss iss-${x.reason}">${fmt(x.qty)} ${rsn(o, x.reason)}${x.note ? ' · ' + esc(x.note) : ''}</span>`).join('')}
       ${left ? `<span class="iss iss-wait">${fmt(left)} bekleniyor</span>` : ''}</div>`;
   }
   function orderCard(o) {
     const sup = S.supplier(o.supplierId);
     const st = o.status === 'verildi' && o.partial ? { name: 'Kısmen geldi · kalan yolda', tone: 'azaliyor', icon: '🚚' }
-      : o.status === 'teslim' && o.short ? { name: 'Eksik / iadeli teslim', tone: 'azaliyor', icon: '⚠️' }
+      : o.status === 'teslim' && o.short ? { name: o.bought ? 'Eksikli alındı' : 'Eksik / iadeli teslim', tone: 'azaliyor', icon: '⚠️' }
       : o.status === 'tedarik' && o.contacts?.length ? { name: 'İletildi · cevap bekleniyor', tone: 'azaliyor', icon: '📨' }
+      : o.status === 'alisveris' && o.partial ? { name: `Kısmen alındı · ${o.shopper}`, tone: 'azaliyor', icon: '🛒' }
+      : o.status === 'alisveris' ? { name: `Alışverişte · ${o.shopper}`, tone: 'iyi', icon: '🛒' }
+      : o.status === 'teslim' && o.bought && !o.short ? { name: 'Alındı', tone: 'pasif', icon: '🛍️' }
       : OST[o.status] || OST.verildi;
     const total = o.lines.length;
-    const meta = o.status === 'teslim' ? `Teslim: ${ago(o.receivedAt)} · ${esc(o.receivedBy)}`
+    const meta = o.status === 'teslim' ? `${o.bought ? 'Alan' : 'Teslim'}: ${esc(o.receivedBy)} · ${ago(o.receivedAt)}${o.spent ? ` · <b>${fmt(o.spent)} ₺</b>` : ''}`
       : o.status === 'red' ? `Reddeden: ${esc(o.rejectedBy)} · ${ago(o.rejectedAt)}`
       : o.status === 'tedarik' ? (o.contacts?.length ? `${esc(o.contacts[o.contacts.length - 1].by)} iletti (${o.contacts[o.contacts.length - 1].via === 'tel' ? 'telefon' : 'WhatsApp'}) · ${ago(o.contacts[o.contacts.length - 1].at)}`
           : `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}${contactors(o).length ? ` · İletecek: <b>${esc(contactors(o).map(u => u.name).join(', '))}</b>` : ''}`)
       : o.status === 'yok' ? `${esc(o.confirmedBy || '')} · ${ago(o.confirmedAt)}`
+      : o.status === 'alisveris' ? `Alacak: <b>${esc(o.shopper)}</b>${o.shopDue ? ` · ${etaTxt(o.shopDue)}` : ''} · atayan ${esc(o.assignedBy)} · ${ago(o.assignedAt)}`
       : o.status === 'verildi' ? (o.confirmedAt ? `Tedarikçi onayı: ${esc(o.confirmedBy)} · ${ago(o.confirmedAt)}${o.eta ? ` · <b>Teslim ${etaTxt(o.eta)}</b>` : ''}` : `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}`)
       : `${contributors(o).length > 1 ? 'Ekleyenler' : 'Hazırlayan'}: ${esc(contributors(o).join(', '))} · ${ago(o.createdAt)}`;
     return `<div class="card order-card" style="padding:0;margin-bottom:12px">
@@ -748,15 +758,18 @@
       ${supNoteHTML(o)}
       ${(o.cutLines || []).length ? `<div class="o-note"><span>🚫 Tedarikçide yok:</span> ${esc(o.cutLines.map(l => `${S.item(l.itemId)?.name || '?'} ${fmt(l.asked ?? l.qty)} ${S.item(l.itemId)?.unit || ''}`).join(', '))}</div>` : ''}
       ${o.supplierReply ? `<div class="o-note"><span>📞 Tedarikçi cevabı:</span> ${esc(o.supplierReply)}</div>` : ''}
+      ${o.shopNote && ['alisveris', 'teslim'].includes(o.status) ? `<div class="o-note admin"><span>🛒 ${esc(o.assignedBy)} → ${esc(o.shopper)}:</span> ${esc(o.shopNote)}</div>` : ''}
       <div class="sup-foot btn-row">
         <button class="btn sm" data-act="pdf-order" data-id="${o.id}">📄 PDF</button>
         ${o.status === 'onay' && can('siparis_onay') ? `<button class="btn primary" data-act="review-order" data-id="${o.id}">İncele ve onayla</button>` : ''}
         ${o.status === 'tedarik' && can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}
-        ${o.status === 'tedarik' && canContact(o) ? `${sup?.phone ? `<a class="btn sm" href="tel:+${esc(sup.phone)}" data-act="contact-tel" data-id="${o.id}">📞 Ara</a><button class="btn wa sm" data-act="contact-wa" data-id="${o.id}">WhatsApp</button>` : ''}<button class="btn primary" data-act="supplier-result" data-id="${o.id}">Sonucu gir</button>` : ''}
+        ${o.status === 'tedarik' && canContact(o) ? `<button class="btn ${sup?.mode === 'pickup' ? 'primary' : 'sm'}" data-act="assign-shop" data-id="${o.id}">🛒 Personel alsın</button>` : ''}
+        ${o.status === 'alisveris' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${canContact(o) ? `<button class="btn ghost sm" data-act="assign-shop" data-id="${o.id}">Başkasına ata</button>` : ''}<button class="btn sm" data-act="share-list" data-id="${o.id}">📋 Listeyi paylaş</button>${canReceive(o) ? `<button class="btn primary" data-act="receive" data-id="${o.id}">${o.partial ? 'Kalanı da aldım' : 'Aldım · stoğa ekle'}</button>` : ''}` : ''}
+        ${o.status === 'tedarik' && canContact(o) ? `${sup?.phone ? `<a class="btn sm" href="tel:+${esc(sup.phone)}" data-act="contact-tel" data-id="${o.id}">📞 Ara</a><button class="btn wa sm" data-act="contact-wa" data-id="${o.id}">WhatsApp</button>` : ''}<button class="btn ${sup?.mode === 'pickup' ? 'sm' : 'primary'}" data-act="supplier-result" data-id="${o.id}">Sonucu gir</button>` : ''}
         ${o.status === 'onay' && !can('siparis_onay') && isMine(o) ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">Geri çek</button>` : ''}
         ${o.status === 'verildi' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${o.partial && can('teslim') ? `<button class="btn ghost sm" data-act="close-rest" data-id="${o.id}">Kalanı bekleme</button>` : ''}${can('teslim') ? `<button class="btn primary" data-act="receive" data-id="${o.id}">${o.partial ? 'Kalanı teslim al' : 'Teslim aldım'}</button>` : ''}` : ''}
       </div>
-      ${hasIssues(o) && sup?.phone && (can('teslim') || can('siparis_onay')) && !readOnly() ? `<div class="sup-foot2"><button class="btn wa block" data-act="wa-issue" data-id="${o.id}">Eksik / iadeyi tedarikçiye WhatsApp'la bildir</button></div>` : ''}
+      ${hasIssues(o) && !o.bought && o.status !== 'alisveris' && sup?.phone && (can('teslim') || can('siparis_onay')) && !readOnly() ? `<div class="sup-foot2"><button class="btn wa block" data-act="wa-issue" data-id="${o.id}">Eksik / iadeyi tedarikçiye WhatsApp'la bildir</button></div>` : ''}
     </div>`;
   }
 
@@ -800,9 +813,10 @@
       <label class="field"><span>🛡️ Personele not <em class="fhint">sadece programda</em></span><textarea id="rvNote" rows="2" placeholder="örn. Karpuz nane yerine elma aldık · red sebebi">${esc(o.adminNote || '')}</textarea></label>
       <div class="btn-row">
         <button class="btn danger" id="rvRej">Reddet</button>
-        <button class="btn dark" id="rvOk">Onayla · müdür iletsin</button>
+        <button class="btn dark" id="rvOk">${sup?.mode === 'pickup' ? 'Onayla' : 'Onayla · müdür iletsin'}</button>
       </div>
       ${sup?.phone ? `<button class="btn wa block" style="margin-top:8px" id="rvWa">Onayla ve tedarikçiye ben ileteyim (WhatsApp)</button>` : ''}
+      <button class="btn block" style="margin-top:8px" id="rvShop">🛒 Onayla ve bir personele aldır</button>
       <button class="btn ghost block" style="margin-top:6px" id="rvPdf">📄 PDF önizle</button>
       <div class="small muted" style="margin-top:10px">${(o.log || []).map(l => `${esc(l.user)} ${LOG_TXT[l.action] || l.action} · ${ago(l.at)}`).join('<br>')}</div>`,
       sh => {
@@ -826,6 +840,7 @@
           toast(wa ? `${o.no} onaylandı ve iletildi · tedarikçinin cevabını gir` : `${o.no} onaylandı · tedarikçiye iletilecek`);
         };
         sh.querySelector('#rvOk').onclick = () => approve(false);
+        sh.querySelector('#rvShop').onclick = () => { if (!save()) return toast('Listede kalem yok'); S.approveOrder(oid, user.name); ui.sipTab = 'yolda'; assignSheet(oid); };
         sh.querySelector('#rvWa')?.addEventListener('click', () => approve(true));
         sh.querySelector('#rvRej').onclick = () => {
           const note = sh.querySelector('#rvNote').value.trim();
@@ -1332,12 +1347,14 @@
         out.push({ id, at: l.at, icon: '✅', title: `${o.no} onaylandı`, body: `${supName(o)}${o.adminNote ? ' · ' + o.adminNote : ''}`, hash: '#/siparis', tab: o.status === 'tedarik' ? 'tedarik' : 'yolda' });
       else if (l.action === 'tedarikci_onay' && (isMine(o) || can('siparis_onay') || isDev() || can('teslim')) && o.log[0]?.action !== 'olusturdu')
         out.push({ id, at: l.at, icon: '🚚', title: `${o.no} tedarikçi onayladı${l.partial ? ' (eksikli)' : ''}`, body: `${supName(o)}${l.eta ? ' · teslim ' + etaTxt(l.eta) : ''}${l.note ? ' · ' + l.note : ''} · ${l.user}`, hash: '#/siparis', tab: 'yolda' });
+      else if (['atadi', 'yeniden_atadi'].includes(l.action) && l.to === me && o.status === 'alisveris' && o.shopper === me)
+        out.push({ id, at: l.at, icon: '🛒', title: `Sana alışveriş listesi atandı`, body: `${o.no} · ${supName(o)} · ${o.lines.length} kalem${l.note ? ' · ' + l.note : ''}`, hash: '#/siparis', tab: 'yolda' });
       else if (l.action === 'tedarikci_yok' && (isMine(o) || can('siparis_onay') || isDev()))
         out.push({ id, at: l.at, icon: '🚫', title: `${o.no} tedarikçi karşılayamadı`, body: `${supName(o)}${l.note ? ' · ' + l.note : ''} · ${l.user}`, hash: '#/siparis', tab: 'gecmis' });
       else if (l.action === 'reddetti' && isMine(o))
         out.push({ id, at: l.at, icon: '✖️', title: `${o.no} reddedildi`, body: o.adminNote || supName(o), hash: '#/siparis', tab: 'gecmis' });
       else if (l.action === 'teslim_aldi' && (isMine(o) || can('siparis_onay') || isDev()))
-        out.push({ id, at: l.at, icon: l.short ? '⚠️' : '📦', title: `${o.no} ${l.short ? 'eksik/iadeli teslim alındı' : 'teslim alındı'}`, body: `${supName(o)} · ${l.user}`, hash: '#/siparis', tab: 'gecmis' });
+        out.push({ id, at: l.at, icon: l.short ? '⚠️' : '📦', title: `${o.no} ${o.bought ? (l.short ? 'alındı (eksikli)' : 'alındı') : l.short ? 'eksik/iadeli teslim alındı' : 'teslim alındı'}`, body: `${supName(o)} · ${l.user}${l.spent ? ' · ' + fmt(l.spent) + ' ₺' : ''}`, hash: '#/siparis', tab: 'gecmis' });
       else if (l.action === 'kismi_teslim' && (isMine(o) || can('siparis_onay') || isDev()))
         out.push({ id, at: l.at, icon: '⚠️', title: `${o.no} kısmen geldi`, body: `${supName(o)} · ${l.user} · kalan bekleniyor`, hash: '#/siparis', tab: 'yolda' });
     }));
@@ -1535,8 +1552,8 @@
     const st = S.status(it), dept = S.dept(it.deptId), sup = S.supplier(it.supplierId);
     const hist = S.get().movements.filter(m => m.itemId === id).slice(0, 5);
     const canCount = canCountDept(it.deptId);
-    const onay = S.pendingQtyFor(id, ['onay', 'tedarik']), yol = S.pendingQtyFor(id, ['verildi']);
-    const open = S.get().orders.filter(o => ['onay', 'tedarik', 'verildi'].includes(o.status) && o.lines.some(l => l.itemId === id && (o.status !== 'verildi' || S.lineLeft(l) > 0)));
+    const onay = S.pendingQtyFor(id, ['onay', 'tedarik']), yol = S.pendingQtyFor(id, ['verildi', 'alisveris']);
+    const open = S.get().orders.filter(o => ['onay', 'tedarik', 'verildi', 'alisveris'].includes(o.status) && o.lines.some(l => l.itemId === id && (!['verildi', 'alisveris'].includes(o.status) || S.lineLeft(l) > 0)));
     const canOrder = (can('siparis_hazirla') || can('siparis_direkt')) && sup;
     const gap = Math.max(it.target - it.qty - onay - yol, 0);
     let v = it.qty, oq = gap > 0 ? Math.ceil(gap * 2) / 2 : 0;
@@ -1560,9 +1577,9 @@
       <h2 class="section">Sipariş</h2>
       ${open.length ? `<div class="list" style="margin-bottom:10px">${open.map(o => {
         const l = o.lines.find(x => x.itemId === id), os = OST[o.status];
-        return `<div class="row"><span class="lg-dot ${o.status === 'verildi' ? 'seg-yol' : 'seg-onay'}"></span>
-          <div class="main"><div class="t">${esc(o.no)} · ${fmt(o.status === 'verildi' ? S.lineLeft(l) : l.qty)} ${esc(it.unit)}${o.status === 'verildi' && l.received ? ` <span class="small muted">(${fmt(l.received)} geldi)</span>` : ''}</div><div class="s">${esc(S.supplier(o.supplierId)?.name || '')} · ${esc(o.createdBy)} · ${ago(o.createdAt)}</div></div>
-          ${o.status === 'verildi' && can('teslim') ? `<button class="btn primary sm" data-recv="${o.id}">Teslim al</button>`
+        return `<div class="row"><span class="lg-dot ${['verildi', 'alisveris'].includes(o.status) ? 'seg-yol' : 'seg-onay'}"></span>
+          <div class="main"><div class="t">${esc(o.no)} · ${fmt(['verildi', 'alisveris'].includes(o.status) ? S.lineLeft(l) : l.qty)} ${esc(it.unit)}${o.status === 'alisveris' ? ` <span class="small muted">🛒 ${esc(o.shopper)}</span>` : ''}${o.status === 'verildi' && l.received ? ` <span class="small muted">(${fmt(l.received)} geldi)</span>` : ''}</div><div class="s">${esc(S.supplier(o.supplierId)?.name || '')} · ${esc(o.createdBy)} · ${ago(o.createdAt)}</div></div>
+          ${['verildi', 'alisveris'].includes(o.status) && canReceive(o) ? `<button class="btn primary sm" data-recv="${o.id}">${o.status === 'alisveris' ? 'Aldım' : 'Teslim al'}</button>`
             : o.status === 'onay' && can('siparis_onay') ? `<button class="btn sm" data-rev="${o.id}">İncele</button>`
             : o.status === 'tedarik' && canContact(o) ? `<button class="btn sm" data-sres="${o.id}">Tedarikçi</button>` : `<span class="badge st-${os.tone}">${os.name}</span>`}
         </div>`; }).join('')}</div>` : ''}
@@ -1671,7 +1688,8 @@
   const editDept = id => form(id ? 'Bölümü düzenle' : 'Yeni bölüm', [{ k: 'name', label: 'Adı', req: true, ph: 'örn. Nargile' }, { k: 'icon', label: 'Simge (emoji)', ph: '💨' }],
     id ? S.dept(id) : { icon: '📦' }, v => S.upsert('depts', { ...v, id: id || undefined, color: S.dept(id)?.color || '#7a4b2a' }),
     id ? () => { if (S.get().items.some(i => i.deptId === id)) return toast('Önce bölümdeki malzemeleri taşı/sil'); S.remove('depts', id); } : null);
-  const editSup = id => form(id ? 'Tedarikçiyi düzenle' : 'Yeni tedarikçi', [{ k: 'name', label: 'Firma adı', req: true }, { k: 'contact', label: 'Yetkili' }, { k: 'phone', label: 'WhatsApp numarası', type: 'tel', ph: '905xxxxxxxxx' }],
+  const editSup = id => form(id ? 'Tedarikçiyi düzenle' : 'Yeni tedarikçi', [{ k: 'name', label: 'Firma adı', req: true }, { k: 'contact', label: 'Yetkili' }, { k: 'phone', label: 'WhatsApp numarası', type: 'tel', ph: '905xxxxxxxxx' },
+    { k: 'mode', label: 'Mal nasıl geliyor?', type: 'select', options: [['', '🚚 Tedarikçi getirir'], ['pickup', '🛒 Biz gidip alırız (market vb.)']] }],
     id ? S.supplier(id) : {}, v => { v.phone = v.phone.replace(/\D/g, '').replace(/^0/, '90'); S.upsert('suppliers', { ...v, id: id || undefined }); },
     id ? () => S.remove('suppliers', id) : null);
   function editUser(id) {
@@ -1724,6 +1742,38 @@
       });
   }
 
+  // alışveriş: listeyi bir personele ata (market, tedarikçinin getirmediği durumlar)
+  function assignSheet(oid, after) {
+    const o = S.order(oid), sup = S.supplier(o.supplierId);
+    const people = S.get().users.filter(u => u.role !== 'gelistirici');
+    let to = o.shopper || '', due = null, dueKey = '';
+    const day = n => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return d.getTime(); };
+    const draw = sh => {
+      sh.querySelectorAll('[data-to]').forEach(b => b.classList.toggle('on', b.dataset.to === to));
+      sh.querySelectorAll('[data-due]').forEach(b => b.classList.toggle('on', b.dataset.due === dueKey));
+      const b = sh.querySelector('#asOk'); b.disabled = !to; b.textContent = to ? `${to} alsın` : 'Kim alacak? Seç';
+    };
+    sheet(`<h3>🛒 Alışverişe gönder</h3><div class="sub">${esc(sup?.name || 'Market')} · ${esc(o.no)} · ${o.lines.length} kalem. Seçtiğin kişi listeyi uygulamada görür, aldıklarını işaretleyip stoğa ekler.</div>
+      <div class="field"><span>Kim alacak?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0">${people.map(u => `<button class="chip" data-to="${esc(u.name)}">${esc(u.name)} <small class="muted">${roleName(u.role)}</small></button>`).join('')}</div></div>
+      <div class="field"><span>Ne zaman?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0"><button class="chip" data-due="0">Bugün</button><button class="chip" data-due="1">Yarın</button></div></div>
+      <label class="field"><span>Not <em class="fhint">alacak kişiye</em></span><input id="asNote" placeholder="örn. Metro'dan al, fişi getir · kasadan 1500 ₺ verildi" value="${esc(o.shopNote || '')}"></label>
+      <button class="btn primary block" id="asOk"></button>`, sh => {
+      draw(sh);
+      sh.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { to = b.dataset.to; draw(sh); });
+      sh.querySelectorAll('[data-due]').forEach(b => b.onclick = () => { dueKey = dueKey === b.dataset.due ? '' : b.dataset.due; due = dueKey ? day(+dueKey) : null; draw(sh); });
+      sh.querySelector('#asOk').onclick = () => {
+        S.assignShopper(oid, user.name, { to, note: sh.querySelector('#asNote').value.trim(), due });
+        ui.sipTab = 'yolda'; closeSheet(); render(); toast(`${o.no} → ${to} alışverişe gidecek`);
+        if (after) setTimeout(after, 280);
+      };
+    });
+  }
+  function shopListText(o) {
+    const sup = S.supplier(o.supplierId);
+    return `🛒 ${S.get().cafe.name} alışveriş listesi (${o.no})${sup ? ' · ' + sup.name : ''}\n` +
+      o.lines.filter(l => S.lineLeft(l) > 0).map(l => { const it = S.item(l.itemId); return `☐ ${it?.name || '?'}: ${fmt(S.lineLeft(l))} ${it?.unit || ''}`; }).join('\n') +
+      (o.shopNote ? `\n\nNot: ${o.shopNote}` : '');
+  }
   // tedarikçiden gelen cevap: ne kadar verebiliyor, ne zaman getirecek
   function supplierSheet(oid, after) {
     const o = S.order(oid), sup = S.supplier(o.supplierId);
@@ -1750,6 +1800,7 @@
         <input type="date" id="spDate" class="chip" style="min-width:150px"></div></div>
       <label class="field"><span>Tedarikçinin cevabı / not <em class="fhint">programda görünür</em></span><input id="spNote" placeholder="örn. Karpuz nane yokmuş, haftaya gelir · fiyat arttı"></label>
       <button class="btn primary block" id="spOk"></button>
+      <button class="btn block" style="margin-top:8px" id="spShop">🛒 Tedarikçi getirmiyor · personel gidip alsın</button>
       <button class="btn ghost block" style="margin-top:6px;color:var(--bad)" id="spFail">Tedarikçi karşılayamadı · siparişi kapat</button>`, sh => {
       draw(sh);
       sh.addEventListener('click', e => {
@@ -1773,6 +1824,7 @@
         if (r?.status === 'verildi') ui.sipTab = 'yolda';
         done(r?.status === 'verildi' ? `${o.no} yolda${eta ? ' · teslim ' + etaTxt(eta) : ''}` : `${o.no} kapatıldı`);
       };
+      sh.querySelector('#spShop').onclick = () => assignSheet(oid, after);
       sh.querySelector('#spFail').onclick = () => {
         const note = sh.querySelector('#spNote').value.trim();
         if (!confirm('Sipariş "Tedarikçi karşılayamadı" olarak kapatılsın mı? Malzemeler tekrar sipariş listesine düşer.')) return;
@@ -1780,6 +1832,8 @@
       };
     });
   }
+  const SHOP_RSN = { eksik: 'Bulamadım', begenmedim: 'Beğenmedim · almadım', hasarli: 'Pahalı · almadım', gelmedi: 'Alınmadı' };
+  const rsn = (o, r) => ((o.bought || o.status === 'alisveris') ? SHOP_RSN[r] : RSN[r]) || r;
   const RSN = { eksik: 'Eksik geldi', begenmedim: 'Beğenmedim · iade', hasarli: 'Hasarlı · iade', gelmedi: 'Gelmedi' };
   function receiveSheet(oid, after) {
     const o = S.order(oid), sup = S.supplier(o.supplierId);
@@ -1792,11 +1846,11 @@
           <div class="small muted">${l.received ? `Sipariş ${fmt(l.qty)} · önce gelen ${fmt(l.received)} · bekleyen <b>${fmt(left)}</b>` : `Sipariş: <b>${fmt(left)}</b>`} ${esc(it?.unit || '')}</div></div>
           <div class="stepper"><button data-rs="-1">−</button><input class="num" inputmode="decimal" data-rq value="${fmt(v.qty)}"><button data-rs="1">+</button></div></div>
         <div class="rcv-q">
-          <button class="chip ${miss <= 0 ? 'on' : ''}" data-all>✓ Tamam geldi</button>
-          <button class="chip ${v.qty === 0 ? 'on' : ''}" data-none>Hiç gelmedi / almadım</button>
+          <button class="chip ${miss <= 0 ? 'on' : ''}" data-all>${o.status === 'alisveris' ? '✓ Hepsini aldım' : '✓ Tamam geldi'}</button>
+          <button class="chip ${v.qty === 0 ? 'on' : ''}" data-none>${o.status === 'alisveris' ? 'Almadım' : 'Hiç gelmedi / almadım'}</button>
         </div>
-        ${miss > 0 ? `<div class="rcv-why"><div class="small"><b>${fmt(miss)} ${esc(it?.unit || '')}</b> teslim alınmıyor. Neden?</div>
-          <div class="chips">${['eksik', 'begenmedim', 'hasarli'].map(r => `<button class="chip ${v.reason === r ? 'on' : ''}" data-why="${r}">${RSN[r]}</button>`).join('')}</div>
+        ${miss > 0 ? `<div class="rcv-why"><div class="small"><b>${fmt(miss)} ${esc(it?.unit || '')}</b> ${o.status === 'alisveris' ? 'alınmadı' : 'teslim alınmıyor'}. Neden?</div>
+          <div class="chips">${['eksik', 'begenmedim', 'hasarli'].map(r => `<button class="chip ${v.reason === r ? 'on' : ''}" data-why="${r}">${rsn(o, r)}</button>`).join('')}</div>
           <input class="note-in" data-rn placeholder="Kısa not (isteğe bağlı) · örn. tütün nemliydi" value="${esc(v.note)}"></div>` : ''}
       </div>`;
     };
@@ -1806,14 +1860,16 @@
       if (ui.rcvOpen == null) ui.rcvOpen = true;
       sh.querySelector('#rcvLines').innerHTML = lines.map(lineHTML).join('');
       sh.querySelector('#rcvOpt').innerHTML = anyEksik ? `<div class="card rcv-opt"><div class="small" style="font-weight:700;margin-bottom:6px">Eksik kalanlar ne olacak?</div>
-          <label class="radio-row"><input type="radio" name="ro" value="1" ${ui.rcvOpen ? 'checked' : ''}><span><b>Sonra gelecek</b><small>Sipariş "yolda" kalır, sadece eksik miktar beklenir</small></span></label>
+          <label class="radio-row"><input type="radio" name="ro" value="1" ${ui.rcvOpen ? 'checked' : ''}><span><b>${o.status === 'alisveris' ? 'Sonra alınacak' : 'Sonra gelecek'}</b><small>${o.status === 'alisveris' ? 'Liste açık kalır, sadece kalanlar beklenir' : 'Sipariş "yolda" kalır, sadece eksik miktar beklenir'}</small></span></label>
           <label class="radio-row"><input type="radio" name="ro" value="0" ${!ui.rcvOpen ? 'checked' : ''}><span><b>Gelmeyecek, siparişi kapat</b><small>Eksik miktar, stok azsa tekrar sipariş listesine düşer</small></span></label></div>`
         : anyShort ? `<div class="card small muted rcv-opt">İade edilen miktar stoğa eklenmez; stok azsa malzeme tekrar sipariş listesine düşer.</div>` : '';
       sh.querySelector('#rcv').textContent = anyShort ? 'Gelenleri stoğa ekle' : 'Hepsi tamam · stoğa ekle';
     };
     ui.rcvOpen = true;
-    sheet(`<h3>Teslim al</h3><div class="sub">${esc(sup?.name || '')} · ${esc(o.no || '')} · gelen miktarı kontrol et. Eksik ya da beğenmediğin ürünü azalt.</div>
+    const shop = o.status === 'alisveris';
+    sheet(`<h3>${shop ? '🛒 Alışverişi tamamla' : 'Teslim al'}</h3><div class="sub">${esc(sup?.name || '')} · ${esc(o.no || '')} · ${shop ? 'aldığın miktarı gir. Bulamadığın ya da almadığın ürünü azalt.' : 'gelen miktarı kontrol et. Eksik ya da beğenmediğin ürünü azalt.'}</div>
       <div id="rcvLines"></div><div id="rcvOpt"></div>
+      ${shop ? `<label class="field" style="margin-top:6px"><span>Harcanan tutar (₺) <em class="fhint">isteğe bağlı</em></span><input id="rcvSpent" inputmode="decimal" placeholder="örn. 1250"></label>` : ''}
       <button class="btn primary block" style="margin-top:14px" id="rcv"></button>`, sh => {
       draw(sh);
       const lineOf = e => { const el = e.target.closest('[data-line]'); return el && [el, lines.find(l => l.itemId === el.dataset.line)]; };
@@ -1838,9 +1894,9 @@
         if ('rq' in e.target.dataset) st[r[1].itemId].qty = Math.min(S.lineLeft(r[1]), Math.max(0, num(e.target.value)));
       });
       sh.querySelector('#rcv').onclick = () => {
-        const res = S.receiveOrder(oid, st, user.name, ui.rcvOpen);
+        const res = S.receiveOrder(oid, st, user.name, ui.rcvOpen, { spent: num(sh.querySelector('#rcvSpent')?.value || '0') || 0 });
         closeSheet(); render();
-        toast(res.status === 'teslim' ? (res.short ? 'Teslim alındı · eksik/iade kaydedildi' : 'Teslim alındı, stok güncellendi') : 'Gelenler stoğa eklendi · kalan bekleniyor');
+        toast(res.status === 'teslim' ? (res.short ? 'Kaydedildi · eksikler not edildi' : 'Stoğa eklendi') : 'Alınanlar stoğa eklendi · kalan bekleniyor');
         if (after) setTimeout(after, 280);
       };
     });
@@ -1915,6 +1971,8 @@
       'contact-tel': () => { S.logContact(id, user.name, 'tel'); setTimeout(render, 300); },
       'contact-wa': () => { const o = S.order(id); S.logContact(id, user.name, 'wa'); window.open(`https://wa.me/${S.supplier(o.supplierId).phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank'); render(); toast('İletildi olarak kaydedildi · cevap gelince "Sonucu gir"'); },
       'supplier-result': () => supplierSheet(id),
+      'assign-shop': () => assignSheet(id),
+      'share-list': () => shareText(`${S.order(id).no} alışveriş listesi`, shopListText(S.order(id))),
       'go-gecmis': () => { ui.sipTab = 'gecmis'; },
       'open-item': () => openItem(id),
       'stok-dept': () => { ui.stokDept = id; render(); },
