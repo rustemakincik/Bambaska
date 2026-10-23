@@ -474,3 +474,4 @@ details.more summary { color: var(--muted); font-weight: 700; font-size: 13px; p
 .order-box { background: var(--card); border: 1.5px dashed var(--accent); border-radius: 14px; padding: 12px; }
 .ob-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; margin-bottom: 10px; }
 .pending.p-yol { color: var(--ok); } .pending.p-onay { color: var(--warn); }
+.by { font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 1px; }

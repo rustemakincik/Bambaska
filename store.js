@@ -143,6 +143,15 @@ const Store = (() => {
   function commit() { persist(); commitHooks.forEach(f => f(db)); subs.forEach(f => f()); }
   const SORT = { movements: (a, b) => b.at - a.at, assetLog: (a, b) => b.at - a.at, orders: (a, b) => b.createdAt - a.createdAt };
 
+  // ---- sipariş kalemi yardımcıları
+  const partsOf = (o, l) => l.parts && l.parts.length ? l.parts : [{ by: o.createdBy, qty: l.qty, at: o.createdAt }];
+  const notesOf = o => o.notes ? [...o.notes] : (o.note ? [{ by: o.createdBy, text: o.note, at: o.createdAt }] : []);
+  function addLine(o, l, user, t) {
+    const ex = o.lines.find(x => x.itemId === l.itemId);
+    if (ex) { ex.parts = [...partsOf(o, ex), { by: user, qty: l.qty, at: t }]; ex.qty = Math.round((ex.qty + l.qty) * 100) / 100; }
+    else o.lines.push({ itemId: l.itemId, qty: l.qty, parts: [{ by: user, qty: l.qty, at: t }] });
+  }
+
   // ---- yardımcılar
   const status = it => {
     if (it.qty <= 0) return 'bitti';
@@ -217,6 +226,7 @@ const Store = (() => {
       return 'SP-' + String(max + 1).padStart(4, '0');
     },
     order: id => db.orders.find(o => o.id === id),
+    partsOf, notesOf,
     // yönetici doğrudan verir (onay gerekmez)
     createOrder(supplierId, lines, user, note = '') {
       const o = { id: uid(), no: this.nextOrderNo(), supplierId, lines, status: 'verildi', createdAt: now(), createdBy: user,
@@ -224,10 +234,58 @@ const Store = (() => {
       db.orders.unshift(o); commit(); return o;
     },
     // personel yöneticiye onaya gönderir
+    // personel yöneticiye onaya gönderir. Aynı tedarikçiye ait onay bekleyen sipariş varsa
+    // yeni kalemler ona eklenir (tek liste); kimin ne eklediği kalem bazında tutulur.
     requestOrder(supplierId, lines, user, note = '') {
-      const o = { id: uid(), no: this.nextOrderNo(), supplierId, lines, status: 'onay', createdAt: now(), createdBy: user,
-        note, adminNote: '', log: [{ at: now(), user, action: 'onaya_gonderdi', note }] };
-      db.orders.unshift(o); commit(); return o;
+      const t = now();
+      const open = this.openOrderFor(supplierId);
+      if (open) {
+        lines.forEach(l => addLine(open, l, user, t));
+        if (note) (open.notes = notesOf(open)).push({ by: user, text: note, at: t });
+        (open.log ||= []).push({ at: t, user, action: 'ekledi', note });
+        this.lastMerged = true; commit(); return open;
+      }
+      const o = { id: uid(), no: this.nextOrderNo(), supplierId: supplierId || null, lines: [], status: 'onay', createdAt: t, createdBy: user,
+        note: '', notes: note ? [{ by: user, text: note, at: t }] : [], adminNote: '', log: [{ at: t, user, action: 'onaya_gonderdi', note }] };
+      lines.forEach(l => addLine(o, l, user, t));
+      db.orders.unshift(o); this.lastMerged = false; commit(); return o;
+    },
+    openOrderFor(supplierId) {
+      return db.orders.filter(o => o.status === 'onay' && (o.supplierId || null) === (supplierId || null))
+        .sort((a, b) => a.createdAt - b.createdAt)[0] || null;
+    },
+    // eski kayıtlar: aynı tedarikçiye ait birden fazla onay bekleyen siparişi tek listede topla
+    mergeOpenOrders() {
+      const groups = {};
+      db.orders.filter(o => o.status === 'onay').forEach(o => (groups[o.supplierId || '_'] ||= []).push(o));
+      let changed = false;
+      Object.values(groups).filter(g => g.length > 1).forEach(g => {
+        g.sort((a, b) => a.createdAt - b.createdAt);
+        const base = g[0];
+        base.notes = notesOf(base);
+        g.slice(1).forEach(o => {
+          o.lines.forEach(l => partsOf(o, l).forEach(pt => addLine(base, { itemId: l.itemId, qty: pt.qty }, pt.by, pt.at || o.createdAt)));
+          base.notes.push(...notesOf(o));
+          (base.log ||= []).push(...(o.log || []).map(x => x.action === 'onaya_gonderdi' ? { ...x, action: 'ekledi' } : x));
+          db.orders = db.orders.filter(x => x.id !== o.id);
+        });
+        base.log.sort((a, b) => a.at - b.at);
+        changed = true;
+      });
+      if (changed) commit();
+      return changed;
+    },
+    // personel kendi eklediği kalemleri geri çeker; başkalarınınki kalır
+    withdrawFromOrder(orderId, user) {
+      const o = this.order(orderId); if (!o) return;
+      o.lines = o.lines.map(l => {
+        const keep = partsOf(o, l).filter(pt => pt.by !== user);
+        return { ...l, parts: keep, qty: keep.reduce((a, pt) => a + pt.qty, 0) };
+      }).filter(l => l.qty > 0);
+      o.notes = notesOf(o).filter(n => n.by !== user);
+      if (!o.lines.length) db.orders = db.orders.filter(x => x.id !== orderId);
+      else (o.log ||= []).push({ at: now(), user, action: 'geri_cekti' });
+      commit();
     },
     updateOrder(id, patch, user) {
       const o = this.order(id); if (!o) return;

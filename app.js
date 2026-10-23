@@ -320,7 +320,7 @@
           return w.length ? `<a href="#/siparis" data-act="go-onay" class="card approve-card">
             <span style="font-size:22px">⏳</span><div style="flex:1"><b>${w.length} sipariş onayını bekliyor</b><div class="small muted">${esc(w.map(o => `${o.createdBy} · ${S.supplier(o.supplierId)?.name || ''}`).join(', '))}</div></div><span class="btn primary sm">İncele</span></a>` : '';
         }
-        const mine = db.orders.filter(o => o.createdBy === user.name && ['onay', 'red'].includes(o.status) || (o.createdBy === user.name && o.status === 'verildi' && o.approvedBy !== user.name && Date.now() - (o.approvedAt || 0) < 864e5)).slice(0, 3);
+        const mine = db.orders.filter(o => isMine(o) && ['onay', 'red'].includes(o.status) || (isMine(o) && o.status === 'verildi' && o.approvedBy !== user.name && Date.now() - (o.approvedAt || 0) < 864e5)).slice(0, 3);
         return mine.map(o => { const st = OST[o.status]; return `<a href="#/siparis" data-act="go-${o.status === 'onay' ? 'onay' : o.status === 'red' ? 'gecmis' : 'yolda'}" class="card" style="display:flex;align-items:center;gap:10px;margin-top:10px;text-decoration:none;color:inherit">
           <span style="font-size:22px">${st.icon}</span><div style="flex:1;min-width:0"><b>${esc(o.no)} · ${esc(S.supplier(o.supplierId)?.name || '')}</b><div class="small muted">${o.adminNote ? '🛡️ ' + esc(o.adminNote) : `${o.lines.length} kalem`}</div></div><span class="badge st-${st.tone}">${st.name}</span></a>`; }).join('');
       })()}
@@ -453,8 +453,16 @@
     teslim: { name: 'Teslim alındı', tone: 'pasif', icon: '✅' },
     red: { name: 'Reddedildi', tone: 'kritik', icon: '✖️' },
   };
-  const LOG_TXT = { olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı' };
-  const visibleOrders = () => S.get().orders.filter(o => can('siparis_onay') || can('siparis_direkt') || o.createdBy === user.name
+  const lineBy = (o, l) => [...new Set(S.partsOf(o, l).map(p => p.by))];
+  const contributors = o => [...new Set(o.lines.flatMap(l => lineBy(o, l)).concat(o.createdBy))];
+  const noteList = o => S.notesOf(o);
+  const isMine = o => contributors(o).includes(user.name);
+  const byTxt = (o, l) => {
+    const m = new Map(); S.partsOf(o, l).forEach(p => m.set(p.by, (m.get(p.by) || 0) + p.qty));
+    return m.size > 1 ? [...m].map(([n, q]) => `${n} ${fmt(q)}`).join(' · ') : [...m.keys()][0];
+  };
+  const LOG_TXT = { ekledi: 'listeye ekledi', geri_cekti: 'kalemlerini geri çekti', olusturdu: 'siparişi verdi', onaya_gonderdi: 'onaya gönderdi', duzenledi: 'listeyi düzenledi', onayladi: 'onayladı', reddetti: 'reddetti', teslim_aldi: 'teslim aldı' };
+  const visibleOrders = () => S.get().orders.filter(o => can('siparis_onay') || can('siparis_direkt') || isMine(o)
     || (can('teslim') && ['verildi', 'teslim'].includes(o.status)));
   const myNeeds = () => {
     const ds = myDepts().map(d => d.id);
@@ -531,7 +539,7 @@
     const meta = o.status === 'teslim' ? `Teslim: ${ago(o.receivedAt)} · ${esc(o.receivedBy)}`
       : o.status === 'red' ? `Reddeden: ${esc(o.rejectedBy)} · ${ago(o.rejectedAt)}`
       : o.status === 'verildi' ? `Onaylayan: ${esc(o.approvedBy || o.createdBy)} · ${ago(o.approvedAt || o.createdAt)}`
-      : `Hazırlayan: ${esc(o.createdBy)} · ${ago(o.createdAt)}`;
+      : `${contributors(o).length > 1 ? 'Ekleyenler' : 'Hazırlayan'}: ${esc(contributors(o).join(', '))} · ${ago(o.createdAt)}`;
     return `<div class="card order-card" style="padding:0;margin-bottom:12px">
       <div class="sup-head">
         <span style="font-size:22px">${st.icon}</span>
@@ -539,14 +547,14 @@
           <div class="s">${meta}</div></div>
         <span class="badge st-${st.tone}">${st.name}</span>
       </div>
-      ${o.lines.slice(0, 6).map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc(it?.name || 'silinmiş malzeme')}</div><b>${fmt(l.received ?? l.qty)} ${esc(it?.unit || '')}</b></div>`; }).join('')}
-      ${total > 6 ? `<div class="order-line small muted">+ ${total - 6} kalem daha</div>` : ''}
-      ${o.note ? `<div class="o-note"><span>💬 ${esc(o.createdBy)}:</span> ${esc(o.note)}</div>` : ''}
+      ${o.lines.slice(0, 10).map(l => { const it = S.item(l.itemId); return `<div class="order-line"><div class="main">${esc(it?.name || 'silinmiş malzeme')}${o.status === 'onay' || contributors(o).length > 1 ? `<div class="by">👤 ${esc(byTxt(o, l))}</div>` : ''}</div><b>${fmt(l.received ?? l.qty)} ${esc(it?.unit || '')}</b></div>`; }).join('')}
+      ${total > 10 ? `<div class="order-line small muted">+ ${total - 10} kalem daha</div>` : ''}
+      ${noteList(o).map(n => `<div class="o-note"><span>💬 ${esc(n.by)}:</span> ${esc(n.text)}</div>`).join('')}
       ${o.adminNote ? `<div class="o-note admin"><span>🛡️ Yönetici:</span> ${esc(o.adminNote)}</div>` : ''}
       <div class="sup-foot btn-row">
         <button class="btn sm" data-act="pdf-order" data-id="${o.id}">📄 PDF</button>
         ${o.status === 'onay' && can('siparis_onay') ? `<button class="btn primary" data-act="review-order" data-id="${o.id}">İncele ve onayla</button>` : ''}
-        ${o.status === 'onay' && !can('siparis_onay') && o.createdBy === user.name ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">Geri çek</button>` : ''}
+        ${o.status === 'onay' && !can('siparis_onay') && isMine(o) ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">Geri çek</button>` : ''}
         ${o.status === 'verildi' ? `${can('siparis_onay') ? `<button class="btn ghost sm" data-act="cancel-order" data-id="${o.id}">İptal</button>` : ''}${can('teslim') ? `<button class="btn primary" data-act="receive" data-id="${o.id}">Teslim aldım</button>` : ''}` : ''}
       </div>
     </div>`;
@@ -561,7 +569,7 @@
       sh.querySelector('#rvLines').innerHTML = lines.map((l, i) => {
         const it = S.item(l.itemId);
         return `<div class="order-line">
-          <div class="main"><div class="t" style="font-weight:600">${esc(it?.name || '?')}</div><div class="small muted">Elde ${fmt(it?.qty)} · hedef ${fmt(it?.target)}</div></div>
+          <div class="main"><div class="t" style="font-weight:600">${esc(it?.name || '?')}</div><div class="small muted">Elde ${fmt(it?.qty)} · hedef ${fmt(it?.target)}</div><div class="by">👤 ${esc(byTxt(o, l))}</div></div>
           <div class="stepper"><button data-rv="${i}" data-d="-1">−</button><input data-rvq="${i}" inputmode="decimal" value="${fmt(l.qty)}"><button data-rv="${i}" data-d="1">+</button></div>
           <span class="small muted" style="width:34px">${esc(it?.unit || '')}</span>
           <button class="x-btn" data-rvx="${i}" aria-label="Çıkar">✕</button>
@@ -584,8 +592,8 @@
     sheet(`
       <div class="code">${esc(o.no)}</div>
       <h3>${esc(sup?.name || 'Tedarikçi')}</h3>
-      <div class="sub">Hazırlayan <b>${esc(o.createdBy)}</b> · ${ago(o.createdAt)} · <span id="rvCount"></span></div>
-      ${o.note ? `<div class="o-note" style="border-radius:12px;margin-bottom:12px"><span>💬 ${esc(o.createdBy)}:</span> ${esc(o.note)}</div>` : ''}
+      <div class="sub">${contributors(o).length > 1 ? 'Ekleyenler' : 'Hazırlayan'} <b>${esc(contributors(o).join(', '))}</b> · ${ago(o.createdAt)} · <span id="rvCount"></span></div>
+      ${noteList(o).map(n => `<div class="o-note" style="border-radius:12px;margin-bottom:8px"><span>💬 ${esc(n.by)}:</span> ${esc(n.text)}</div>`).join('')}
       <div class="list" id="rvLines"></div>
       <select class="add-sel" id="rvAdd"></select>
       <label class="field" style="margin-top:12px"><span>Yönetici notu</span><textarea id="rvNote" rows="2" placeholder="örn. Karpuz nane yerine elma al, cuma teslim olsun">${esc(o.adminNote || '')}</textarea></label>
@@ -600,7 +608,8 @@
         draw(sh);
         sh.querySelector('#rvAdd').onchange = e => {
           const it = S.item(e.target.value); if (!it) return;
-          lines.push({ itemId: it.id, qty: S.suggested(it) || stepOf(it) }); draw(sh);
+          const q = S.suggested(it) || stepOf(it);
+          lines.push({ itemId: it.id, qty: q, parts: [{ by: user.name, qty: q, at: Date.now() }] }); draw(sh);
         };
         const save = () => {
           sh.querySelectorAll('[data-rvq]').forEach(inp => { lines[+inp.dataset.rvq].qty = num(inp.value); });
@@ -644,7 +653,7 @@
     let o;
     if (via === 'request') {
       o = S.requestOrder(sid === '_' ? null : sid, mk(), user.name, note);
-      toast(`${o.no} yöneticiye onaya gönderildi`);
+      toast(S.lastMerged ? `${o.no} listesine eklendi (onay bekliyor)` : `${o.no} yöneticiye onaya gönderildi`);
     } else {
       o = S.createOrder(sid === '_' ? null : sid, mk(), user.name, note);
       if (via === 'wa') window.open(`https://wa.me/${S.supplier(sid).phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank');
@@ -665,15 +674,15 @@
     if (docSpec.type === 'order') {
       docs = docSpec.ids.map(id => S.order(id)).filter(Boolean).map(o => ({
         no: o.no, status: OST[o.status]?.name, sup: S.supplier(o.supplierId), date: o.createdAt,
-        lines: o.lines.map(l => ({ it: S.item(l.itemId), qty: l.qty })), note: o.note, noteBy: o.createdBy, adminNote: o.adminNote,
-        prepared: [o.createdBy, o.createdAt], approved: o.approvedBy ? [o.approvedBy, o.approvedAt] : null,
+        lines: o.lines.map(l => ({ it: S.item(l.itemId), qty: l.qty })), notes: noteList(o).map(n => n.text), adminNote: o.adminNote,
+        approved: o.approvedBy ? [o.approvedBy, o.approvedAt] : null,
       }));
     } else { // hazırlanan (henüz gönderilmemiş) liste
       const groups = {};
       myNeeds().forEach(it => { const d = draftFor(it); if (d.on && d.qty > 0) (groups[it.supplierId || '_'] ||= []).push({ it, qty: d.qty }); });
       docs = Object.entries(groups).map(([sid, lines]) => ({
         no: 'TASLAK', status: 'Hazırlanıyor', sup: S.supplier(sid), date: Date.now(), lines,
-        note: ui.orderNotes?.[sid] || '', noteBy: user.name, prepared: [user.name, Date.now()], approved: null,
+        notes: ui.orderNotes?.[sid] ? [ui.orderNotes[sid]] : [], approved: null,
       }));
     }
     const d2 = t => new Date(t).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -702,12 +711,12 @@
             <tbody>${d.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.it?.name || '?')}</td><td>${esc(S.dept(l.it?.deptId)?.name || '')}</td><td class="r"><b>${fmt(l.qty)}</b></td><td>${esc(l.it?.unit || '')}</td><td class="c"><span class="box"></span></td></tr>`).join('')}</tbody>
             <tfoot><tr><td colspan="6">Toplam ${d.lines.length} kalem</td></tr></tfoot>
           </table>
-          ${d.note || d.adminNote ? `<section class="p-notes">
-            ${d.note ? `<div><span>Sorumlu notu (${esc(d.noteBy)})</span><p>${esc(d.note)}</p></div>` : ''}
+          ${d.notes.length || d.adminNote ? `<section class="p-notes">
+            ${d.notes.length ? `<div><span>Notlar</span>${d.notes.map(t => `<p>${esc(t)}</p>`).join('')}</div>` : ''}
             ${d.adminNote ? `<div><span>Yönetici notu</span><p>${esc(d.adminNote)}</p></div>` : ''}
           </section>` : ''}
           <footer class="p-sign">
-            <div><span>Hazırlayan</span><b>${esc(d.prepared[0])}</b><small>${d2(d.prepared[1])}</small></div>
+            <div><span>Hazırlayan</span><b>&nbsp;</b><small>İmza</small></div>
             <div><span>Onaylayan</span><b>${d.approved ? esc(d.approved[0]) : '&nbsp;'}</b><small>${d.approved ? d2(d.approved[1]) : 'İmza'}</small></div>
             <div><span>Teslim alan</span><b>&nbsp;</b><small>İmza / tarih</small></div>
           </footer>
@@ -1193,7 +1202,7 @@
           const q = num(oin.value); if (q <= 0) return toast('Sipariş miktarı gir');
           const note = sh.querySelector('#ordNote').value.trim(), lines = [{ itemId: id, qty: q }];
           let o;
-          if (via === 'req') { o = S.requestOrder(it.supplierId, lines, user.name, note); toast(`${o.no} onaya gönderildi`); }
+          if (via === 'req') { o = S.requestOrder(it.supplierId, lines, user.name, note); toast(S.lastMerged ? `${o.no} listesine eklendi` : `${o.no} onaya gönderildi`); }
           else {
             o = S.createOrder(it.supplierId, lines, user.name, note);
             if (via === 'wa') window.open(`https://wa.me/${sup.phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank');
@@ -1349,6 +1358,7 @@
       i.onfocus = () => i.select();
       i.onblur = () => { i.value = fmt(ui.sayimDraft[i.dataset.cnt] ?? S.item(i.dataset.cnt).qty); };
     });
+    if (r === 'siparis' && !window.__merging) { window.__merging = true; setTimeout(() => { S.mergeOpenOrders(); window.__merging = false; }, 0); }
     if (r === 'siparis') document.querySelectorAll('[data-onote]').forEach(i => { i.oninput = () => { ui.orderNotes[i.dataset.onote] = i.value; }; });
     if (r === 'siparis') document.querySelectorAll('[data-olq]').forEach(i => {
       i.onfocus = () => i.select();
@@ -1390,7 +1400,12 @@
       'doc-back': () => { location.hash = '#/siparis'; },
       'go-onay': () => { ui.sipTab = 'onay'; },
       receive: () => receiveSheet(id),
-      'cancel-order': () => { if (confirm(S.order(id)?.status === 'onay' ? 'Talep geri çekilsin mi?' : 'Sipariş iptal edilsin mi?')) { S.cancelOrder(id); toast('Sipariş iptal edildi'); } },
+      'cancel-order': () => {
+        const o = S.order(id); if (!o) return;
+        if (o.status === 'onay' && !can('siparis_onay')) {
+          if (confirm('Senin eklediğin kalemler bu listeden çıkarılsın mı? Başkalarının eklediği kalemler kalır.')) { S.withdrawFromOrder(id, user.name); toast('Kalemlerin geri çekildi'); }
+        } else if (confirm(o.status === 'onay' ? 'Bu liste tamamen silinsin mi?' : 'Sipariş iptal edilsin mi?')) { S.cancelOrder(id); toast('Sipariş iptal edildi'); }
+      },
       'a-status': () => { ui.aStatus = ui.aStatus === id ? 'all' : id; render(); },
       'a-cat': () => { ui.aCat = id; render(); },
       'open-asset': () => openAsset(id),
