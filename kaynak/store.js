@@ -93,11 +93,17 @@ const Store = (() => {
       note: 'Hafta sonu derbi var, tütün çok gidecek', adminNote: '',
       lines: [{ itemId: byName('Tütün – Çift').id, qty: 9 }, { itemId: byName('Tütün – Karpuz').id, qty: 9 }, { itemId: byName('Lüle').id, qty: 10 }],
       log: [{ at: t - 0.5 * H, user: 'Mehmet', action: 'onaya_gonderdi', note: 'Hafta sonu derbi var, tütün çok gidecek' }],
+    }, {
+      id: uid(), no: 'SP-0003', supplierId: 's3', status: 'tedarik', createdAt: t - 2 * H, createdBy: 'Ayşe',
+      approvedBy: 'Yönetici', approvedAt: t - 1.5 * H, note: '', adminNote: '', supplierNote: '',
+      lines: [{ itemId: byName('Espresso').id, qty: 2 }],
+      log: [{ at: t - 2 * H, user: 'Ayşe', action: 'onaya_gonderdi' }, { at: t - 1.5 * H, user: 'Yönetici', action: 'onayladi' }],
     }];
     const users = [
       { id: 'u1', name: 'Yönetici', role: 'yonetici', pin: '1234', deptIds: [] },
       { id: 'u2', name: 'Mehmet', role: 'personel', pin: '1111', deptIds: ['nargile'] },
       { id: 'u3', name: 'Ayşe', role: 'personel', pin: '2222', deptIds: ['bar', 'mutfak'] },
+      { id: 'u4', name: 'Serkan', role: 'mudur', pin: '3333', deptIds: [] },
     ];
     return { version: 1, cafe: { ...DEFAULT_CAFE, name: 'Bambaşka (Demo)' }, depts, suppliers, items, movements, orders, users, ...seedAssets() };
   }
@@ -273,7 +279,7 @@ const Store = (() => {
     },
 
     // sipariş
-    pendingQtyFor(itemId, statuses = ['onay', 'verildi']) {
+    pendingQtyFor(itemId, statuses = ['onay', 'tedarik', 'verildi']) {
       return db.orders.filter(o => statuses.includes(o.status))
         .reduce((s, o) => { const l = o.lines.find(x => x.itemId === itemId); return s + (l ? (o.status === 'verildi' ? lineLeft(l) : l.qty) : 0); }, 0);
     },
@@ -284,10 +290,42 @@ const Store = (() => {
     order: id => db.orders.find(o => o.id === id),
     partsOf, notesOf,
     // yönetici doğrudan verir (onay gerekmez)
-    createOrder(supplierId, lines, user, note = '') {
-      const o = { id: uid(), no: this.nextOrderNo(), supplierId, lines, status: 'verildi', createdAt: now(), createdBy: user,
-        approvedBy: user, approvedAt: now(), note: '', notes: [], adminNote: '', supplierNote: note, log: [{ at: now(), user, action: 'olusturdu' }] };
+    // via: 'wa' (WhatsApp ile iletildi → tedarikçi cevabı beklenir) | 'mark' (tedarikçi zaten onayladı → yolda) | diğer: iletilecek
+    createOrder(supplierId, lines, user, note = '', via = '') {
+      const t = now(), confirmed = via === 'mark' || via === 'manual';
+      const o = { id: uid(), no: this.nextOrderNo(), supplierId, lines, status: confirmed ? 'verildi' : 'tedarik', createdAt: t, createdBy: user,
+        approvedBy: user, approvedAt: t, note: '', notes: [], adminNote: '', supplierNote: note, log: [{ at: t, user, action: 'olusturdu' }] };
+      if (via === 'wa') { o.contacts = [{ at: t, by: user, via: 'wa' }]; o.log.push({ at: t, user, action: 'iletti', via: 'wa' }); }
+      if (confirmed) { o.confirmedBy = user; o.confirmedAt = t; o.log.push({ at: t, user, action: 'tedarikci_onay' }); }
       db.orders.unshift(o); commit(); return o;
+    },
+    // ---- tedarikçi ile iletişim (onaydan sonra; asıl sorumlu müdür)
+    logContact(id, user, via) {
+      const o = this.order(id); if (!o || o.status !== 'tedarik') return;
+      (o.contacts ||= []).push({ at: now(), by: user, via });
+      o.log.push({ at: now(), user, action: 'iletti', via }); commit(); return o;
+    },
+    // r: { lines: {itemId: tedarikçinin verebildiği miktar}, eta, note }
+    supplierConfirm(id, user, r = {}) {
+      const o = this.order(id); if (!o) return;
+      const av = r.lines || {};
+      o.lines.forEach(l => {
+        if (av[l.itemId] == null) return;
+        const q = Math.max(0, Number(av[l.itemId]) || 0);
+        if (q < l.qty) { l.asked = l.asked ?? l.qty; l.qty = q; }
+      });
+      const cut = o.lines.filter(l => l.qty <= 0);
+      if (cut.length) o.cutLines = (o.cutLines || []).concat(cut);
+      o.lines = o.lines.filter(l => l.qty > 0);
+      if (!o.lines.length) return this.supplierFail(id, user, r.note || 'Tedarikçide ürün yok');
+      Object.assign(o, { status: 'verildi', confirmedBy: user, confirmedAt: now(), eta: r.eta || null, supplierReply: r.note || '' });
+      o.log.push({ at: now(), user, action: 'tedarikci_onay', eta: r.eta || null, note: r.note || '', partial: o.lines.some(l => l.asked != null) || !!cut.length });
+      commit(); return o;
+    },
+    supplierFail(id, user, note = '') {
+      const o = this.order(id); if (!o) return;
+      Object.assign(o, { status: 'yok', confirmedBy: user, confirmedAt: now(), supplierReply: note });
+      o.log.push({ at: now(), user, action: 'tedarikci_yok', note }); commit(); return o;
     },
     // personel yöneticiye onaya gönderir
     // personel yöneticiye onaya gönderir. Aynı tedarikçiye ait onay bekleyen sipariş varsa
@@ -356,7 +394,7 @@ const Store = (() => {
     approveOrder(id, user, adminNote) {
       const o = this.order(id); if (!o) return;
       if (adminNote !== undefined) o.adminNote = adminNote;
-      Object.assign(o, { status: 'verildi', approvedBy: user, approvedAt: now() });
+      Object.assign(o, { status: 'tedarik', approvedBy: user, approvedAt: now() });
       o.log.push({ at: now(), user, action: 'onayladi', note: o.adminNote }); commit(); return o;
     },
     rejectOrder(id, user, adminNote) {
