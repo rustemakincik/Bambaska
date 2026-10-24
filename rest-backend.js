@@ -26,6 +26,8 @@ window.KafeRest = (function () {
             return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
         if (typeof v === 'string')
             return { stringValue: v };
+        if (v && typeof v === 'object' && v.__ts)
+            return { timestampValue: new Date(v.__ts).toISOString() };
         if (Array.isArray(v))
             return { arrayValue: { values: v.map(enc) } };
         return { mapValue: { fields: encMap(v) } };
@@ -157,15 +159,49 @@ window.KafeRest = (function () {
         }
         await token();
         var uid = auth.uid;
+        var commit = function (writes) { return api('POST', root + ':commit', { writes: writes }); };
+        var memDoc = function (d) { return d ? Object.assign({ uid: lastSeg(d.name) }, decMap(d.fields)) : null; };
         return {
             uid: uid,
-            async createCafe() {
-                await api('PATCH', cafePath + '?currentDocument.exists=false', { fields: encMap({ joinCode: cloud.joinCode, createdAt: Date.now(), createdBy: uid }) });
-                await this.join();
+            // kafe var mı? (kurulum ekranı "Yeni kafe kur"u gizler)
+            async cafeExists() { var d = await api('GET', cafePath); return !!d; },
+            // kafeyi kur: kafe kaydı + bu telefon yönetici cihazı (tek seferde)
+            async createCafe(info) {
+                await commit([
+                    { update: { name: cafePath, fields: encMap({ createdAt: Date.now(), createdBy: uid, name: info.name || '' }) }, currentDocument: { exists: false } },
+                    { update: { name: docPath('members', uid), fields: encMap({ level: 'owner', joinedAt: Date.now(), device: info.device || '', lastSeen: Date.now(), lastUser: info.user || '', invitedBy: '', inviteName: info.user || '' }) }, currentDocument: { exists: false } },
+                ]);
             },
-            async join() {
-                await api('PATCH', docPath('members', uid), { fields: encMap({ code: cloud.joinCode, joinedAt: Date.now(), device: navigator.userAgent.slice(0, 120) }) });
+            // davetle katıl: üyelik + davet "kullanıldı" tek seferde (kurallar ikisini birlikte kontrol eder)
+            async join(inv) {
+                var ip = docPath('invites', inv.id);
+                await commit([
+                    { update: { name: docPath('members', uid), fields: encMap({ level: 'member', invite: inv.id, joinedAt: Date.now(), device: inv.device || '', lastSeen: Date.now(), lastUser: '', invitedBy: inv.by || '', inviteName: inv.forName || '' }) }, currentDocument: { exists: false } },
+                    { update: { name: ip, fields: encMap({ usedBy: uid }) }, updateMask: { fieldPaths: ['usedBy'] }, updateTransforms: [{ fieldPath: 'usedAt', setToServerValue: 'REQUEST_TIME' }] },
+                ]);
+                try {
+                    await api('DELETE', docPath('removed', uid));
+                }
+                catch (e) { }
             },
+            async getDoc(coll, id) { var d = await api('GET', docPath(coll, id)); return d ? decMap(d.fields) : null; },
+            async me() { return memDoc(await api('GET', docPath('members', uid))); },
+            async touch(p) { await api('PATCH', docPath('members', uid) + '?updateMask.fieldPaths=lastSeen&updateMask.fieldPaths=lastUser&updateMask.fieldPaths=device', { fields: encMap({ lastSeen: Date.now(), lastUser: p.user || '', device: p.device || '' }) }); },
+            async wasRemoved() { var d = await api('GET', docPath('removed', uid)); return !!d; },
+            async listMembers() { return ((await listAll('members')) || []).map(memDoc); },
+            async listInvites() { return ((await listAll('invites')) || []).map(function (d) { var o = memDoc(d); o.id = o.uid; o.exp = ms(o.exp); return o; }); },
+            async createInvite(inv) {
+                await commit([{ update: { name: docPath('invites', inv.id), fields: encMap({ exp: { __ts: inv.exp }, mode: inv.mode, forUser: inv.forUser || '', forName: inv.forName || '', byName: inv.byName || '', createdBy: uid, createdAt: Date.now(), usedBy: null }) }, currentDocument: { exists: false } }]);
+            },
+            async cancelInvite(id) { await api('DELETE', docPath('invites', id)); },
+            async setLevel(mid, lvl) { await api('PATCH', docPath('members', mid) + '?updateMask.fieldPaths=level&currentDocument.exists=true', { fields: encMap({ level: lvl }) }); },
+            async removeDevice(mid) {
+                await commit([{ delete: docPath('members', mid) }, { update: { name: docPath('removed', mid), fields: encMap({ at: Date.now(), by: uid }) } }]);
+            },
+            async leave() { try {
+                await api('DELETE', docPath('members', uid));
+            }
+            catch (e) { } },
             subscribe(colls, onChanges, onStatus) {
                 var stop = false, timer = null, lastRev = null, lastMs = {}, delMs = 0, busy = false;
                 var every = function () { return window.__restPoll || 15000; };
@@ -193,8 +229,17 @@ window.KafeRest = (function () {
                         onChanges(c, docs.map(function (d) { return { id: d.id, data: d.data }; }), {});
                     }
                     var dels = (await since('deleted', delMs)).map(toChange), by = {};
-                    dels.forEach(function (d) { delMs = Math.max(delMs, d.t); if (d.data.coll && colls.indexOf(d.data.coll) >= 0)
-                        (by[d.data.coll] = by[d.data.coll] || []).push({ id: d.data.id, data: null }); });
+                    for (var k = 0; k < dels.length; k++) {
+                        var d = dels[k];
+                        delMs = Math.max(delMs, d.t);
+                        if (!d.data.coll || colls.indexOf(d.data.coll) < 0)
+                            continue;
+                        // silinip sonra yeniden oluşturulan kayıt (ör. yedekten geri yükleme): hâlâ duruyorsa silme
+                        var still = await api('GET', docPath(d.data.coll, d.data.id));
+                        if (still)
+                            continue;
+                        (by[d.data.coll] = by[d.data.coll] || []).push({ id: d.data.id, data: null });
+                    }
                     Object.keys(by).forEach(function (c) { onChanges(c, by[c], {}); });
                     lastRev = n;
                 }
@@ -220,6 +265,26 @@ window.KafeRest = (function () {
                 tick();
                 this._nudge = function () { clearTimeout(timer); timer = setTimeout(tick, 400); };
                 return function () { stop = true; clearTimeout(timer); };
+            },
+            // numara bloğu ayır (iyimser kilit: belge değişmediyse yaz, değiştiyse tekrar dene)
+            async reserve(kind, count, localMax) {
+                var path = docPath('sys', 'counters');
+                for (var i = 0; i < 6; i++) {
+                    var d = await api('GET', path);
+                    var cur = d && d.fields && d.fields[kind] ? Number(dec(d.fields[kind])) || 0 : 0;
+                    var start = Math.max(cur, localMax || 0) + 1, f = {};
+                    f[kind] = enc(start + count - 1);
+                    try {
+                        await api('POST', root + ':commit', { writes: [{ update: { name: path, fields: f }, updateMask: { fieldPaths: [kind] },
+                                    currentDocument: d ? { updateTime: d.updateTime } : { exists: false } }] });
+                        return start;
+                    }
+                    catch (e) {
+                        if (!/FAILED_PRECONDITION|ABORTED|ALREADY_EXISTS|NOT_FOUND|HTTP 409|HTTP 400/.test(String(e.code || '') + ' ' + String(e.message || '')))
+                            throw e;
+                    }
+                }
+                throw new Error('network: sayaç meşgul');
             },
             async write(ops) {
                 for (var i = 0; i < ops.length; i += 150) {

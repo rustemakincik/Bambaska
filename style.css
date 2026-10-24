@@ -675,3 +675,42 @@ a.btn { text-decoration: none; }
 .maint-card .mc-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); }
 .maint-card .mc-row .main { flex: 1; min-width: 0; }
 .o-note a { color: var(--accent); }
+/* excel'den yapıştır */
+.ps-cols { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.nfg .ps-cols > * { margin: 0 4px 4px 0; }
+.ps-cols span { font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+.ps-in { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 13px; border-radius: 12px; border: 1.5px dashed var(--line); padding: 10px; background: var(--bg); color: var(--ink); }
+.ps-sum { margin: 10px 2px 8px; font-size: 13.5px; }
+.ps-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; -webkit-overflow-scrolling: touch; }
+.ps-table table { border-collapse: collapse; font-size: 12.5px; min-width: 100%; }
+.ps-table th, .ps-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.ps-table th { background: var(--bg); font-weight: 700; color: var(--muted); }
+.ps-table tr.dup td { color: var(--muted); text-decoration: line-through; }
+/* işlem geçmişi */
+.row.aud { align-items: flex-start; }
+.aud-ic { font-size: 18px; width: 26px; text-align: center; flex: none; }
+.row.aud .s { white-space: normal; }
+/* yenilikler / sürüm */
+.news-card { margin-bottom: 12px; border: 1.5px solid var(--accent); }
+.news-card .nc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.news-card ul, .news-ul { margin: 6px 0 10px 18px; padding: 0; font-size: 14px; line-height: 1.5; }
+.ver-line { text-align: center; margin: 18px 0 6px; }
+.ver-line button { color: var(--muted); font-size: 12.5px; text-decoration: underline; background: none; }
+.upd-bar { position: fixed; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 60; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px 10px 16px; border-radius: 14px; background: #141414; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.25); font-size: 14px; }
+.upd-bar button { background: var(--accent); color: #fff; border-radius: 10px; padding: 8px 14px; font-weight: 700; }
+.row.aud .t { white-space: normal; overflow: visible; }
+.ps-in { white-space: pre; overflow-x: auto; }
+/* davet / cihazlar / katılım */
+.setup-box.warn { background: rgba(255,196,0,.14); border: 1px solid rgba(255,196,0,.45); }
+.setup-box.pub-asset { text-align: center; }
+.pub-asset .pa-ic { font-size: 40px; margin-bottom: 6px; }
+.dev-lv { padding: 8px 10px; border-radius: 10px; background: var(--bg); }
+.iv-who { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: 12px; background: var(--bg); }
+.iv-pin { font-family: ui-monospace, Menlo, monospace; font-size: 40px; font-weight: 800; letter-spacing: 6px; text-align: center; padding: 14px 0 4px; }
+.iv-timer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.jb-pin { display: block; margin: 10px 0; }
+.jb-pin span { display: block; font-size: 13px; opacity: .8; margin-bottom: 6px; }
+.jb-pin input { width: 100%; font-size: 30px; font-weight: 800; letter-spacing: 6px; text-align: center; padding: 12px; border-radius: 14px; border: 0; background: rgba(255,255,255,.95); color: #111; font-family: ui-monospace, Menlo, monospace; }
+.sheet.locked .grab { visibility: hidden; }
+[hidden] { display: none !important; }

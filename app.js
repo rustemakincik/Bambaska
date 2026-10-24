@@ -57,7 +57,7 @@ var __rest = (this && this.__rest) || function (s, e) {
                 ['demirbas_yonet', 'Demirbaş ekleme / düzenleme / etiket yazdırma'],
             ]],
         ['Diğer', [
-                ['cihaz', 'Yeni telefon ekleme', '“Cihaz ekle” karekodunu gösterebilir'],
+                ['cihaz', 'Cihaz ekleme ve yönetme', 'Davet oluşturur, bağlı cihazları görür/çıkarır (sadece yetkili telefondan)'],
             ]],
     ];
     const PRESET = {
@@ -272,13 +272,33 @@ var __rest = (this && this.__rest) || function (s, e) {
                 setTimeout(() => openEvent(e), 0);
             }
         }
-        if (user)
-            user = S.user(user.id) || user;
+        if (user) {
+            const u = S.user(user.id);
+            if (u)
+                user = u;
+            else if (!S.isDemo && !S.get().users.length) {
+                user = null;
+                try {
+                    localStorage.removeItem(UKEY);
+                }
+                catch (e) { }
+            }
+        }
+        S.setActor(user ? user.name : '');
+        if (!user && route() === 'd' && !S.isDemo && !Sync.cloud && !S.get().users.length)
+            return renderPublicAsset();
         if (!user) {
             if (route() === 'd')
                 pendingDeep = location.hash;
             return renderLogin();
         }
+        if (isAdmin() && !window.__pruned) {
+            window.__pruned = true;
+            setTimeout(() => S.pruneTrash(30), 3000);
+        }
+        if (user.mustChangePin && !S.isDemo && !document.querySelector('.sheet.locked'))
+            setTimeout(() => { if (user && user.mustChangePin && !document.querySelector('.sheet.locked'))
+                openMyPin(true); }, 50);
         const r = route();
         const db = S.get();
         const crit = myNeeds().length;
@@ -307,6 +327,17 @@ var __rest = (this && this.__rest) || function (s, e) {
     }
     // ---------- giriş
     let pin = '', loginUser = null, pinErr = '', fails = 0, lockUntil = 0, showDemo = S.isDemo, clockT = null;
+    // hatalı PIN sayacı sayfa yenilense de korunur
+    try {
+        const L = JSON.parse(localStorage.getItem('kafestok.lock')) || {};
+        fails = L.f || 0;
+        lockUntil = L.u || 0;
+    }
+    catch (e) { }
+    const saveLock = () => { try {
+        localStorage.setItem('kafestok.lock', JSON.stringify({ f: fails, u: lockUntil }));
+    }
+    catch (e) { } };
     const DEMO_USER = { id: '__demo', name: 'Demo hesabı', role: 'demo' };
     const AV_COLORS = ['#c2662d', '#3f8f5a', '#4a6a85', '#8a4fa3', '#b4532a', '#2f7f86', '#a3243b'];
     const avColor = n => AV_COLORS[[...(n || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length];
@@ -390,6 +421,7 @@ var __rest = (this && this.__rest) || function (s, e) {
                 pin = '';
                 loginUser = null;
                 fails = 0;
+                saveLock();
                 clearTimeout(clockT);
                 try {
                     localStorage.setItem(UKEY, u.id);
@@ -400,16 +432,21 @@ var __rest = (this && this.__rest) || function (s, e) {
                 pendingDeep = null;
                 render();
                 checkNotify();
+                Sync.touch(u.name);
+                if (u.mustChangePin && !S.isDemo)
+                    setTimeout(() => openMyPin(true), 200);
                 return;
             }
             fails++;
             pin = '';
             if (fails >= 5) {
-                lockUntil = Date.now() + 30000;
-                fails = 0;
+                lockUntil = Date.now() + 30000 * Math.pow(2, Math.min(4, Math.floor((fails - 5) / 5)));
             }
             else
                 pinErr = `PIN hatalı · ${5 - fails} deneme hakkın kaldı`;
+            if (fails >= 5 && fails % 5 !== 0)
+                lockUntil = Math.max(lockUntil, Date.now() + 30000);
+            saveLock();
             if (navigator.vibrate)
                 navigator.vibrate([40, 40, 40]);
         }
@@ -428,6 +465,15 @@ var __rest = (this && this.__rest) || function (s, e) {
             renderLogin();
         }
     });
+    // etiketi okutan yabancı (kafeye bağlı olmayan telefon): sadece "bu eşya kafeye ait" sayfası
+    function renderPublicAsset() {
+        const db = S.get(), code = routeArg();
+        $app.innerHTML = `<div class="login"><div class="login-glow"></div><div class="login-top">${brandLoginTop(db)}</div>
+      <div class="setup-box pub-asset"><div class="pa-ic">🏷️</div><b>Bu eşya ${esc(window.KAFE_NAME || db.cafe.name)} demirbaşıdır.</b>
+        ${/^DB-\d+$/i.test(code) ? `<div class="code" style="margin:8px 0;font-size:18px">${esc(code.toUpperCase())}</div>` : ''}
+        <p>Bulduysan ya da bir sorun görürsen lütfen kafe çalışanlarına haber ver. Teşekkürler!</p></div>
+      <button class="connect-link" data-act="pub-staff">Kafe çalışanıyım ›</button></div>`;
+    }
     // ---------- İLK KURULUM (gerçek kafe, henüz kullanıcı yok)
     function renderSetup() {
         const db = S.get();
@@ -436,16 +482,26 @@ var __rest = (this && this.__rest) || function (s, e) {
         <div class="setup-box"><b>Kafenin verileri indiriliyor…</b><p>İnternet bağlantısını kontrol et. Uzun sürerse uygulamayı kapatıp aç.</p></div></div>`;
             return;
         }
+        const notice = Sync.removedNotice();
         $app.innerHTML = `
       <div class="login">
         <div class="login-glow"></div>
         <div class="login-top">${brandLoginTop(db)}</div>
+        ${notice ? `<div class="setup-box warn">${notice === 'removed' ? '<b>Bu telefon kafeden çıkarıldı.</b><p>Kafe verileri bu telefondan silindi. Tekrar bağlanmak için yöneticiden yeni bir davet iste.</p>'
+            : '<b>Güvenlik güncellemesi</b><p>Kafe yeni ve daha güvenli bağlantı sistemine geçti. Bu telefonu yöneticiden alacağın <b>yeni davetle</b> tekrar bağla.</p>'}</div>` : ''}
         <div class="setup-title">Hoş geldin 👋</div>
         <div class="setup-sub">Bu telefon için başlangıç yolunu seç.</div>
-        <button class="setup-opt main" data-act="setup-new"><span>🏁</span><div><b>Yeni kafe kur</b><small>İlk telefon. Yönetici olarak sen başlarsın, liste boş gelir; malzemeleri kendin eklersin.</small></div></button>
-        <button class="setup-opt" data-act="scan"><span>📷</span><div><b>Kurulu kafeye bağlan</b><small>Yöneticinin “Cihaz ekle” karekodunu okut.</small></div></button>
+        <button class="setup-opt main" data-act="scan"><span>📷</span><div><b>Kafeye bağlan</b><small>Yöneticinin gösterdiği karekodu okut ya da sana gelen davet bağlantısını aç.</small></div></button>
+        <button class="setup-opt" data-act="setup-new" id="optNew" hidden><span>🏁</span><div><b>Yeni kafe kur</b><small>Sadece ilk telefon için. Bu telefon “yönetici cihazı” olur.</small></div></button>
         <button class="setup-opt" data-act="go-demo"><span>🧪</span><div><b>Demo'yu incele</b><small>Örnek verilerle dene. Gerçek kafeye karışmaz. PIN: 0000</small></div></button>
       </div>`;
+        // kafe bulutta zaten kuruluysa "Yeni kafe kur" hiç gösterilmez
+        const show = v => { const b = document.getElementById('optNew'); if (b)
+            b.hidden = !v; };
+        if (window.__cafeExists === false || !window.KAFE_FIREBASE)
+            show(true);
+        else if (window.__cafeExists !== true)
+            Sync.cafeExists().then(ex => { window.__cafeExists = ex; show(!ex); }).catch(() => show(true)); // internet yoksa gösterilir; bulutta kafe varsa kurallar zaten engeller
     }
     function brandLoginTop(db) {
         return `${cafeMode() === 'name' ? `<div class="brand-mark"><img src="icon.svg" alt=""></div>` : `<div class="brand-logo ${cafeMode() === 'logo' ? 'wide' : ''} bg-${db.cafe.logoBg || 'light'}"><img src="${db.cafe.logo}" alt="${esc(db.cafe.name)}"></div>`}
@@ -482,7 +538,13 @@ var __rest = (this && this.__rest) || function (s, e) {
                 closeSheet(true);
                 location.hash = '#/home';
                 render();
-                toast('Kafe kuruldu. Ana sayfadaki adımlarla devam et.');
+                if (window.KAFE_FIREBASE) {
+                    toast('Kafe buluta kuruluyor…');
+                    Sync.setup({ type: window.__cloudType || 'firebase', name: cafe, user: name }).then(() => { render(); toast('Kafe kuruldu. Bu telefon yönetici cihazı.'); })
+                        .catch(e => toast('Kafe bu telefonda kuruldu, bulut kurulamadı: ' + (e.code || e.message || e) + '. Ayarlar → Bulut’tan tekrar dene.'));
+                }
+                else
+                    toast('Kafe kuruldu. Ana sayfadaki adımlarla devam et.');
             };
         });
     }
@@ -504,7 +566,7 @@ var __rest = (this && this.__rest) || function (s, e) {
             ['İlk sayımı yap', 'Elindeki miktarları gir', db.movements.some(m => m.type === 'sayim'), 'go-sayim'],
             ['Demirbaşları ekle', 'TV, uydu alıcısı, okey masaları… sonra etiket yazdır', db.assets.length > 0, 'new-asset'],
             ['Çalışanları ekle', 'Her biri için rol, PIN ve yetkiler', db.users.length > 1, 'new-user'],
-            ['Telefonları bağla', 'Bulutu kur, diğer telefonlara karekod okut', !!Sync.cloud, 'go-cloud-setup'],
+            ['Çalışanları davet et', 'Her telefon için tek kullanımlık davet (karekod ya da bağlantı + PIN)', !!Sync.cloud && S.get().audit.some(a => a.action === 'davet'), Sync.cloud ? 'cloud-add' : 'go-cloud-setup'],
         ];
         const done = steps.filter(s => s[2]).length;
         if (hidden || done === steps.length)
@@ -549,17 +611,355 @@ var __rest = (this && this.__rest) || function (s, e) {
             };
         });
     }
+    // ---------- Excel'den yapıştır (malzeme / demirbaş)
+    const NO_NUM = 'İnternet yok: demirbaş numarası alınamadı. Bağlantı gelince tekrar dene.';
+    const PASTE = {
+        items: { title: 'Malzemeleri Excel’den yapıştır', cols: ['Ad', 'Bölüm', 'Birim', 'Min', 'Hedef', 'Elde', 'Tedarikçi'],
+            ex: [['Çay', 'Bar', 'kg', '5', '15', '4', 'Toptan Market'], ['Tütün – Elma', 'Nargile', 'paket', '4', '12', '', 'Tütün Toptancısı']] },
+        assets: { title: 'Demirbaşları Excel’den yapıştır', cols: ['Ad', 'Kategori', 'Yer', 'Marka', 'Seri no', 'Not', 'Adet'],
+            ex: [['Salon TV 65"', 'TV', 'Salon', 'Samsung', 'SN65-88213', '', '1'], ['Okey masası', 'Okey', 'Okey bölümü', '', '', '', '6']] },
+    };
+    const HEAD = { name: /^(ad|adı|isim|malzeme|ürün|urun|demirbaş|eşya)( ad[ıi])?$/, dept: /^(bölüm|bolum|departman)/, unit: /^birim/, min: /^min/, target: /^(hedef|max|maks)/,
+        qty: /^(elde|miktar|stok|mevcut)/, supplier: /^(tedarik|firma)/, cat: /^(kategori|tür|tur|grup)/, location: /^(yer|konum|bulundu)/, brand: /^(marka|model)/,
+        serial: /^(seri)/, note: /^(not|açıklama|aciklama)/, count: /^(adet|sayı|sayi)/ };
+    const lc = t => String(t || '').trim().toLocaleLowerCase('tr');
+    function parsePaste(text, kind) {
+        const rows = String(text).replace(/\r/g, '').split('\n').filter(r => r.trim());
+        if (!rows.length)
+            return [];
+        const sep = rows[0].includes('\t') ? '\t' : rows[0].includes(';') ? ';' : ',';
+        let grid = rows.map(r => r.split(sep).map(c => c.trim().replace(/^"(.*)"$/, '$1')));
+        const def = kind === 'items' ? ['name', 'dept', 'unit', 'min', 'target', 'qty', 'supplier'] : ['name', 'cat', 'location', 'brand', 'serial', 'note', 'count'];
+        let map = def;
+        const h = grid[0].map(c => Object.keys(HEAD).find(k => HEAD[k].test(lc(c).replace(/[.:]/g, ''))) || null);
+        if (h.filter(Boolean).length >= 2 && h.includes('name')) {
+            map = h;
+            grid = grid.slice(1);
+        }
+        return grid.map(r => { const o = {}; map.forEach((k, i) => { if (k && r[i] !== undefined && r[i] !== '')
+            o[k] = r[i]; }); return o; }).filter(o => o.name);
+    }
+    const catOf = t => {
+        const x = lc(t);
+        if (!x)
+            return 'diger';
+        const hit = S.ASSET_CATS.find(c => lc(c.name) === x || c.id === x || lc(c.name).split(/[ /]+/).some(w => w.length > 2 && x.includes(w)));
+        return hit ? hit.id : /tv|ekran|uydu|projeks|kumanda|yayın/.test(x) ? 'yayin' : /masa|sandalye|şemsiye|koltuk/.test(x) ? 'mobilya' : /makine|ocak|buzdolab|fırın|cihaz/.test(x) ? 'cihaz' : 'diger';
+    };
+    function openPaste(kind) {
+        const P = PASTE[kind];
+        let rows = [];
+        const plan = () => {
+            const db = S.get(), newDepts = new Set(), newSups = new Set();
+            let dup = 0, total = 0;
+            rows.forEach(r => {
+                if (kind === 'items') {
+                    const d = db.depts.find(x => lc(x.name) === lc(r.dept));
+                    if (r.dept && !d)
+                        newDepts.add(r.dept.trim());
+                    if (r.supplier && !db.suppliers.some(x => lc(x.name) === lc(r.supplier)))
+                        newSups.add(r.supplier.trim());
+                    const did = d ? d.id : null;
+                    if (db.items.some(i => lc(i.name) === lc(r.name) && (!did || i.deptId === did))) {
+                        r._dup = true;
+                        dup++;
+                    }
+                    else {
+                        r._dup = false;
+                        total++;
+                    }
+                }
+                else
+                    total += Math.max(1, Math.min(50, Math.round(num(r.count || 1)) || 1));
+            });
+            return { newDepts: [...newDepts], newSups: [...newSups], dup, total };
+        };
+        const draw = sh => {
+            const pv = sh.querySelector('#psPrev'), go = sh.querySelector('#psGo');
+            if (!rows.length) {
+                pv.innerHTML = '';
+                go.disabled = true;
+                go.textContent = 'Önce listeyi yapıştır';
+                return;
+            }
+            const pl = plan(), keys = kind === 'items' ? ['name', 'dept', 'unit', 'min', 'target', 'qty', 'supplier'] : ['name', 'cat', 'location', 'brand', 'serial', 'count'];
+            pv.innerHTML = `<div class="ps-sum">${rows.length} satır okundu · <b>${pl.total} ${kind === 'items' ? 'malzeme' : 'demirbaş'} eklenecek</b>${pl.dup ? ` · ${pl.dup} zaten var (atlanacak)` : ''}${pl.newDepts.length ? ` · yeni bölüm: ${esc(pl.newDepts.join(', '))}` : ''}${pl.newSups.length ? ` · yeni tedarikçi: ${esc(pl.newSups.join(', '))}` : ''}</div>
+        <div class="ps-table"><table><thead><tr>${keys.map(k => `<th>${({ name: 'Ad', dept: 'Bölüm', unit: 'Birim', min: 'Min', target: 'Hedef', qty: 'Elde', supplier: 'Tedarikçi', cat: 'Kategori', location: 'Yer', brand: 'Marka', serial: 'Seri', count: 'Adet' })[k]}</th>`).join('')}</tr></thead>
+        <tbody>${rows.slice(0, 30).map(r => `<tr class="${r._dup ? 'dup' : ''}">${keys.map(k => `<td>${esc(k === 'cat' ? ACAT(catOf(r.cat)).name : r[k] || (k === 'count' ? '1' : ''))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+        ${rows.length > 30 ? `<div class="small muted">… ve ${rows.length - 30} satır daha</div>` : ''}`;
+            go.disabled = !pl.total;
+            go.textContent = pl.total ? `${pl.total} ${kind === 'items' ? 'malzemeyi' : 'demirbaşı'} ekle` : 'Eklenecek yeni kayıt yok';
+        };
+        sheet(`<h3>📥 ${P.title}</h3>
+      <div class="sub">Excel’de (ya da Google E-Tablolar’da) satırları seç, <b>kopyala</b> ve aşağıya <b>yapıştır</b>. İlk satır başlık olabilir. Sütun sırası:</div>
+      <div class="ps-cols">${P.cols.map(c => `<span>${c}</span>`).join('')}</div>
+      <button class="btn ghost sm" id="psTpl" style="margin:6px 0 10px">📋 Örnek tabloyu kopyala (Excel’e yapıştır, doldur)</button>
+      <textarea id="psIn" rows="6" class="ps-in" placeholder="Buraya yapıştır…"></textarea>
+      <div id="psPrev"></div>
+      <button class="btn primary block" id="psGo" style="margin-top:12px" disabled></button>`, sh => {
+            const inp = sh.querySelector('#psIn');
+            const upd = () => { rows = parsePaste(inp.value, kind); draw(sh); };
+            inp.oninput = upd;
+            draw(sh);
+            sh.querySelector('#psTpl').onclick = () => copyText([P.cols, ...P.ex].map(r => r.join('\t')).join('\n'));
+            sh.querySelector('#psGo').onclick = async () => {
+                const pl = plan(), btn = sh.querySelector('#psGo');
+                if (kind === 'assets' && !Sync.numbersReady('DB', pl.total)) {
+                    btn.disabled = true;
+                    btn.textContent = 'Numaralar alınıyor…';
+                    if (!(await Sync.ensureNumbers('DB', pl.total))) {
+                        toast(NO_NUM);
+                        draw(sh);
+                        return;
+                    }
+                }
+                const n = kind === 'items' ? importItemRows(rows) : importAssetRows(rows);
+                closeSheet();
+                render();
+                toast(`${n} ${kind === 'items' ? 'malzeme' : 'demirbaş'} eklendi`);
+            };
+        });
+    }
+    function importItemRows(rows) {
+        const db = S.get();
+        let n = 0;
+        rows.filter(r => !r._dup).forEach(r => {
+            let d = db.depts.find(x => lc(x.name) === lc(r.dept)) || (r.dept ? null : db.depts[0]);
+            if (!d) {
+                d = { id: 'd' + Math.random().toString(36).slice(2, 8), name: r.dept.trim(), icon: '📦' };
+                db.depts.push(d);
+            }
+            let sp = r.supplier ? db.suppliers.find(x => lc(x.name) === lc(r.supplier)) : null;
+            if (r.supplier && !sp) {
+                sp = { id: 's' + Math.random().toString(36).slice(2, 8), name: r.supplier.trim(), contact: '', phone: '' };
+                db.suppliers.push(sp);
+            }
+            const has = r.qty !== undefined && r.qty !== '';
+            db.items.push({ id: 'i' + Math.random().toString(36).slice(2, 10), deptId: d.id, name: r.name.trim(), unit: (r.unit || 'adet').trim(), qty: has ? num(r.qty) : 0, uncounted: !has,
+                min: num(r.min || 0), target: num(r.target || 0) || num(r.min || 0) * 2, supplierId: sp ? sp.id : '', updatedAt: Date.now(), updatedBy: user.name });
+            n++;
+        });
+        S.audit('toplu', 'items', '', `Excel’den ${n} malzeme`);
+        return n;
+    }
+    function importAssetRows(rows) {
+        let n = 0;
+        try {
+            rows.forEach(r => {
+                const c = Math.max(1, Math.min(50, Math.round(num(r.count || 1)) || 1));
+                for (let i = 1; i <= c; i++) {
+                    S.saveAsset({ name: c > 1 ? `${r.name.trim()} #${i}` : r.name.trim(), cat: catOf(r.cat), status: 'aktif', location: (r.location || '').trim(), brand: (r.brand || '').trim(),
+                        serial: c > 1 ? '' : (r.serial || '').trim(), note: (r.note || '').trim() }, user.name, { quiet: true, noCommit: true });
+                    n++;
+                }
+            });
+        }
+        catch (e) {
+            if (e.code !== 'numara-yok')
+                throw e;
+            toast(NO_NUM);
+        }
+        S.audit('toplu', 'assets', '', `Excel’den ${n} demirbaş`);
+        return n;
+    }
+    // ---------- çöp kutusu (30 gün) ve işlem geçmişi
+    const COLL_TXT = { items: 'malzeme', suppliers: 'tedarikçi', depts: 'bölüm', users: 'kullanıcı', assets: 'demirbaş', services: 'servis', orders: 'sipariş', tickets: 'servis talebi', cafe: 'kafe', devices: 'cihaz', invites: 'davet' };
+    const COLL_IC = { items: '📦', suppliers: '🚚', depts: '🗂️', users: '👤', assets: '🏷️', services: '🔧', orders: '🛒', tickets: '🛠️' };
+    function openTrash() {
+        const lim = Date.now() - 30 * 864e5;
+        const list = (S.get().trash || []).filter(t => t.at >= lim);
+        sheet(`<h3>🗑️ Çöp kutusu</h3><div class="sub">Silinen kayıtlar 30 gün burada bekler, sonra kendiliğinden silinir.</div>
+      <div class="list">${list.map(t => `<div class="row"><span style="font-size:20px">${COLL_IC[t.coll] || '📄'}</span>
+        <div class="main"><div class="t">${esc(t.name || '—')}</div><div class="s">${COLL_TXT[t.coll] || t.coll} · ${esc(t.by)} sildi · ${ago(t.at)} · ${Math.max(0, 30 - Math.floor((Date.now() - t.at) / 864e5))} gün kaldı</div></div>
+        <button class="btn sm" data-tr="${t.id}">Geri al</button></div>`).join('') || '<div class="empty small">Çöp kutusu boş</div>'}</div>`, sh => {
+            sh.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => { const t = S.restoreTrash(b.dataset.tr); toast(t ? `${t.name} geri alındı` : 'Bulunamadı'); openTrash(); });
+        });
+    }
+    const PERM_LABEL = k => (PERMS.flatMap(g => g[1]).find(x => x[0] === k) || [k, k])[1];
+    const ROLE_LABEL = r => roleName(r);
+    function audVal(coll, f, v) {
+        var _a, _b, _c;
+        if (v === '' || v == null)
+            return '—';
+        if (f === 'deptId')
+            return ((_a = S.dept(v)) === null || _a === void 0 ? void 0 : _a.name) || v;
+        if (f === 'supplierId')
+            return ((_b = S.supplier(v)) === null || _b === void 0 ? void 0 : _b.name) || v;
+        if (f === 'serviceId')
+            return ((_c = S.service(v)) === null || _c === void 0 ? void 0 : _c.name) || '—';
+        if (f === 'cat')
+            return ACAT(v).name;
+        if (f === 'role')
+            return ROLE_LABEL(v);
+        if (f === 'deptIds')
+            return (v || []).map(d => { var _a; return ((_a = S.dept(d)) === null || _a === void 0 ? void 0 : _a.name) || d; }).join(', ') || '—';
+        if (f === 'mode')
+            return v === 'pickup' ? 'biz alırız' : coll === 'cafe' ? v : 'tedarikçi getirir';
+        return String(v);
+    }
+    const AUD_FIELD = { name: 'ad', unit: 'birim', min: 'min', target: 'hedef', deptId: 'bölüm', supplierId: 'tedarikçi', contact: 'yetkili', phone: 'telefon', mode: 'şekil', icon: 'simge', role: 'rol', deptIds: 'bölümler',
+        cat: 'kategori', location: 'yer', brand: 'marka', serial: 'seri no', serviceId: 'servis', maintEvery: 'bakım (ay)', note: 'not', topic: 'konu', logo: 'logo' };
+    const AUD_ACT = { ekle: ['➕', 'ekledi'], duzenle: ['✏️', 'düzenledi'], sil: ['🗑️', 'sildi'], geri: ['♻️', 'çöpten geri aldı'], toplu: ['📥', 'toplu ekledi'], ayar: ['⚙️', 'değiştirdi'], sifirla: ['⚠️', ''],
+        geriyukle: ['⏪', 'yedekten geri yükledi'], cihaz: ['📱', ''], davet: ['🔑', ''] };
+    function audRow(a) {
+        const [ic, verb] = AUD_ACT[a.action] || ['•', a.action];
+        const head = a.action === 'sifirla' ? '<b>kafeyi sıfırladı</b>' : ['cihaz', 'davet', 'geriyukle'].includes(a.action) ? esc(a.name) + (verb ? ' ' + verb : '')
+            : a.action === 'toplu' ? `${esc(a.name)}${a.coll === 'assets' && !/demirbaş/.test(a.name) ? ' demirbaş' : ''} ekledi` : `${COLL_TXT[a.coll] || ''} <b>${esc(a.name)}</b> ${verb}`;
+        const det = [];
+        (a.ch || []).forEach(([f, x, y]) => det.push(f === 'logo' ? 'logo değişti' : `${AUD_FIELD[f] || f}: ${esc(audVal(a.coll, f, x))} → ${esc(audVal(a.coll, f, y))}`));
+        if (a.perm) {
+            if (a.perm.on.length)
+                det.push('yetki açıldı: ' + a.perm.on.map(PERM_LABEL).join(', '));
+            if (a.perm.off.length)
+                det.push('yetki kapandı: ' + a.perm.off.map(PERM_LABEL).join(', '));
+        }
+        if (a.pin)
+            det.push('PIN değiştirildi');
+        if (a.note)
+            det.push(esc(a.note));
+        const tr = a.action === 'sil' && S.trashFor(a.coll, a.ref);
+        return `<div class="row aud"><span class="aud-ic">${ic}</span><div class="main"><div class="t"><b>${esc(a.by)}</b> · ${head}</div>
+      ${det.length ? `<div class="s">${det.join(' · ')}</div>` : ''}<div class="s muted">${ago(a.at)}</div></div>
+      ${tr && isAdmin() ? `<button class="btn sm" data-tr="${tr.id}">Geri al</button>` : ''}</div>`;
+    }
+    function openAudit() {
+        const lim = Date.now() - 30 * 864e5;
+        const all = (S.get().audit || []).filter(a => a.at >= lim);
+        const people = [...new Set(all.map(a => a.by))];
+        let who = '', typ = 'all', lim2 = 100;
+        const TYPES = [['all', 'Tümü'], ['sil', 'Silme'], ['duzenle', 'Düzenleme'], ['ekle', 'Ekleme'], ['yetki', 'Yetki / PIN'], ['cihaz', 'Cihaz / davet'], ['diger', 'Diğer']];
+        const match = a => typ === 'all' || (typ === 'yetki' ? (a.perm || a.pin || (a.ch || []).some(c => c[0] === 'role')) : typ === 'cihaz' ? ['cihaz', 'davet'].includes(a.action)
+            : typ === 'ekle' ? ['ekle', 'toplu'].includes(a.action) : typ === 'diger' ? ['ayar', 'geri', 'sifirla', 'geriyukle'].includes(a.action) : a.action === typ);
+        const draw = sh => {
+            const list = all.filter(a => (!who || a.by === who) && match(a));
+            sh.querySelectorAll('[data-ty]').forEach(b => b.classList.toggle('on', b.dataset.ty === typ));
+            sh.querySelector('#auList').innerHTML = list.slice(0, lim2).map(audRow).join('') || '<div class="empty small">Kayıt yok</div>';
+            sh.querySelector('#auMore').style.display = list.length > lim2 ? '' : 'none';
+            sh.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => { const t = S.restoreTrash(b.dataset.tr); toast(t ? `${t.name} geri alındı` : 'Bulunamadı'); closeSheet(); render(); });
+        };
+        sheet(`<h3>📜 İşlem geçmişi</h3><div class="sub">Son 30 gün · kim neyi ekledi, değiştirdi, sildi. Kayıtlar silinemez; daha eskileri günlük yedeklerde durur.</div>
+      <select id="auWho" class="add-sel" style="margin-bottom:8px"><option value="">Herkes</option>${people.map(p => `<option>${esc(p)}</option>`).join('')}</select>
+      <div class="chips" style="flex-wrap:wrap;margin:0 0 10px;padding:0">${TYPES.map(([k, l]) => `<button class="chip" data-ty="${k}">${l}</button>`).join('')}</div>
+      <div class="list" id="auList"></div><button class="btn ghost block" id="auMore" style="margin-top:8px">Daha fazla göster</button>`, sh => {
+            draw(sh);
+            sh.querySelector('#auWho').onchange = e => { who = e.target.value; draw(sh); };
+            sh.querySelectorAll('[data-ty]').forEach(b => b.onclick = () => { typ = b.dataset.ty; draw(sh); });
+            sh.querySelector('#auMore').onclick = () => { lim2 += 100; draw(sh); };
+        });
+    }
+    // ---------- sürüm ve yenilikler
+    const APP_VERSION = '1.30';
+    const CHANGES = [
+        { v: '1.30', date: '25 Ekim 2026', items: ['Güvenli katılım: kişiye özel, tek kullanımlık davet (karekod ya da bağlantı + PIN)', 'Bağlı cihazlar listesi: yetkili telefondan cihaz çıkarma ve yetki verme', 'İlk girişte herkes kendi PIN’ini belirliyor', 'Her gece otomatik yedek e-postası, yedekten geri yükleme', 'Excel’den yapıştırarak toplu malzeme ve demirbaş ekleme', 'Demirbaş, sipariş ve servis numaraları artık hiç çakışmıyor', 'Silinenler 30 gün çöp kutusunda bekliyor, geri alınabiliyor', 'Yönetici için işlem geçmişi: kim neyi değiştirdi'] },
+        { v: '1.29', date: '24 Ekim 2026', items: ['Demirbaşı servise kimin götüreceği / kimin getireceği atanabiliyor', 'Arıza ve bakım talepleri, servisler, periyodik bakım'] },
+    ];
+    const seenVer = () => { try {
+        return localStorage.getItem('kafestok.seenVer');
+    }
+    catch (e) {
+        return APP_VERSION;
+    } };
+    const setSeen = () => { try {
+        localStorage.setItem('kafestok.seenVer', APP_VERSION);
+    }
+    catch (e) { } };
+    if (!seenVer())
+        setSeen(); // ilk kurulum: eski yenilikleri gösterme
+    function newsCard() {
+        if (seenVer() === APP_VERSION)
+            return '';
+        const c = CHANGES.find(x => x.v === APP_VERSION);
+        return `<div class="card news-card"><div class="nc-head">✨ <b>Yeni sürüm ${APP_VERSION}</b><span class="muted small">${c.date}</span></div>
+      <ul>${c.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul><button class="btn sm primary" data-act="news-ok">Tamam</button></div>`;
+    }
+    function openNews() {
+        sheet(`<h3>✨ Yenilikler</h3>${CHANGES.map(c => `<div class="card" style="margin-bottom:10px;box-shadow:none;background:var(--bg)"><b>Sürüm ${c.v}</b> <span class="muted small">· ${c.date}</span><ul class="news-ul">${c.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`).join('')}`);
+    }
+    // açık uygulamada yeni sürüm: kendiliğinden yenilemez, sadece haber verir
+    function checkUpdate() {
+        if (!window.fetch || !location.protocol.startsWith('http'))
+            return;
+        fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(j => {
+            if (!j || !j.v || j.v === APP_VERSION || document.querySelector('.upd-bar'))
+                return;
+            const b = document.createElement('div');
+            b.className = 'upd-bar';
+            b.innerHTML = `<span>✨ Yeni sürüm hazır (${esc(j.v)})</span><button>Yenile</button>`;
+            b.querySelector('button').onclick = () => location.reload();
+            document.body.appendChild(b);
+        }).catch(() => { });
+    }
+    setInterval(checkUpdate, 20 * 60 * 1000);
+    setTimeout(checkUpdate, 15000);
+    function downloadBackup(tag = '') {
+        const a2 = document.createElement('a');
+        a2.href = URL.createObjectURL(new Blob([S.exportJSON()], { type: 'application/json' }));
+        a2.download = `bambaska-yedek-${new Date().toISOString().slice(0, 10)}${tag}.json`;
+        document.body.appendChild(a2);
+        a2.click();
+        a2.remove();
+    }
+    // ---------- yedekten geri yükle (yönetici cihazı)
+    function openRestore() {
+        sheet(`<h3>⏪ Yedekten geri yükle</h3><div class="sub">Günlük yedek e-postasındaki dosyayı ya da “Yedek indir” ile aldığın dosyayı seç.</div>
+      <div class="card small" style="box-shadow:none;background:var(--bad-soft);margin-bottom:10px">⚠️ Kafedeki <b>tüm veriler</b> (malzeme, sipariş, demirbaş, kullanıcılar…) yedekteki hâline döner${Sync.cloud ? ' ve <b>bütün telefonlarda</b> değişir' : ''}. İşlem geçmişi korunur. Önce şu anki hâlin yedeği otomatik indirilir.</div>
+      <input type="file" id="rsFile" accept=".json,application/json" class="add-sel">
+      <div class="small" id="rsInfo" style="margin:8px 0"></div>
+      <label class="field"><span>Onaylamak için <b>GERİ YÜKLE</b> yaz</span><input id="rsTxt" autocapitalize="characters" autocomplete="off"></label>
+      <button class="btn danger block" id="rsGo" disabled>Geri yükle</button>`, sh => {
+            let data = null;
+            const go = sh.querySelector('#rsGo'), txt = sh.querySelector('#rsTxt'), info = sh.querySelector('#rsInfo');
+            const upd = () => { go.disabled = !data || txt.value.trim().replace(/[iİıI]/g, 'I').toUpperCase() !== 'GERI YÜKLE'.replace(/[iİıI]/g, 'I').toUpperCase(); };
+            txt.oninput = upd;
+            sh.querySelector('#rsFile').onchange = e => {
+                const f = e.target.files[0];
+                if (!f)
+                    return;
+                const r = new FileReader();
+                r.onload = () => {
+                    try {
+                        const j = JSON.parse(r.result);
+                        if (!j || !Array.isArray(j.items) || !Array.isArray(j.users) || !j.users.length)
+                            throw new Error('bu bir Bambaşka yedeği değil');
+                        data = j;
+                        info.innerHTML = `✅ ${(j.items || []).length} malzeme · ${(j.orders || []).length} sipariş · ${(j.assets || []).length} demirbaş · ${(j.users || []).length} kullanıcı`;
+                    }
+                    catch (x) {
+                        data = null;
+                        info.textContent = '⚠️ Dosya okunamadı: ' + x.message;
+                    }
+                    upd();
+                };
+                r.readAsText(f);
+            };
+            go.onclick = () => {
+                downloadBackup('-geri-yukleme-oncesi');
+                S.replaceAll(data);
+                if (!S.user(user.id)) {
+                    user = null;
+                    try {
+                        localStorage.removeItem(UKEY);
+                    }
+                    catch (e) { }
+                }
+                closeSheet();
+                render();
+                toast('Yedek geri yüklendi');
+            };
+        });
+    }
     // ---------- gerçek kafeyi sıfırla
     function openResetCafe() {
         sheet(`
       <h3>Kafeyi sıfırla</h3>
       <div class="card small" style="box-shadow:none;background:var(--bad-soft);margin-bottom:12px">⚠️ Malzemeler, tedarikçiler, siparişler, sayım geçmişi, demirbaşlar ve <b>senin dışındaki tüm kullanıcılar</b> silinir.${Sync.cloud ? ' Buluta bağlı <b>tüm telefonlardan</b> da silinir.' : ''} Kafe adı, logo ve bölümler kalır. Geri alınamaz.</div>
-      <div class="small muted" style="margin-bottom:8px">Önce yedek almak istersen: Ayarlar → Yedek indir.</div>
+      <div class="small muted" style="margin-bottom:8px">Sıfırlamadan önce şu anki hâlin yedeği otomatik olarak telefona indirilir.</div>
       <label class="field"><span>Onaylamak için <b>SIFIRLA</b> yaz</span><input id="rsTxt" autocapitalize="characters" autocomplete="off"></label>
       <button class="btn danger block" id="rsGo" disabled>Kafeyi sıfırla</button>`, sh => {
             const inp = sh.querySelector('#rsTxt'), go = sh.querySelector('#rsGo');
             inp.oninput = () => { go.disabled = inp.value.trim().replace(/[iİıI]/g, 'I').toUpperCase() !== 'SIFIRLA'; };
             go.onclick = () => {
+                downloadBackup('-sifirlama-oncesi'); // sıfırlamadan önce otomatik yedek
                 S.resetCafe(user.id);
                 try {
                     localStorage.removeItem('kafestok.onboardHide');
@@ -578,7 +978,16 @@ var __rest = (this && this.__rest) || function (s, e) {
         const crit = myNeeds();
         const enRoute = db.orders.filter(o => o.status === 'verildi' || (o.status === 'alisveris' && !isShopper(o)));
         const greet = new Date().getHours() < 12 ? 'Günaydın' : new Date().getHours() < 18 ? 'İyi günler' : 'İyi akşamlar';
+        if (isAdmin() && Sync.cloud && window.__bk === undefined && !window.__bkAsk) {
+            window.__bkAsk = true;
+            Sync.backupInfo().then(b => { window.__bk = b; if (route() === 'home' && b && (!b.ok || Date.now() - b.at > 36 * 3600e3))
+                render(); });
+        }
+        const bkWarn = isAdmin() && window.__bk && (!window.__bk.ok || Date.now() - window.__bk.at > 36 * 3600e3)
+            ? `<a href="#/ayarlar" class="card approve-card" style="margin-bottom:12px;border-color:var(--bad)"><span style="font-size:22px">⚠️</span><div style="flex:1"><b>Otomatik yedek alınamıyor</b><div class="small muted">Son başarılı yedek: ${ago(window.__bk.at)}. bambaska.yedek e-postasını kontrol et.</div></div></a>` : '';
         return `
+      ${bkWarn}
+      ${newsCard()}
       ${onboardCard()}
       <div class="muted small" style="margin:2px 2px 10px">${greet}, <b style="color:var(--ink)">${esc(user.name)}</b> · ${new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
       ${crit.length ? `
@@ -1224,6 +1633,7 @@ var __rest = (this && this.__rest) || function (s, e) {
       <div class="btn-row" style="margin-top:12px">
         ${can('demirbas_yonet') ? `<button class="btn" data-act="labels">🖨️ Etiket yazdır</button><button class="btn primary" data-act="new-asset">+ Demirbaş ekle</button>` : ''}
       </div>
+      ${can('demirbas_yonet') ? `<button class="btn ghost block" style="margin-top:8px" data-act="paste-assets">📥 Excel’den toplu yapıştır</button>` : ''}
       <div class="small muted" style="text-align:center;margin-top:10px">Etiketi okutunca eşyanın sayfası açılır: arızalı, tamirde, aktif, hurda olarak güncelleyebilirsin.</div>`;
     }
     // duruma göre hızlı işlemler: [hedef durum, buton yazısı, otomatik not]
@@ -1717,9 +2127,29 @@ var __rest = (this && this.__rest) || function (s, e) {
                 toast('Kaydedildi');
                 return;
             }
-            for (let i = 1; i <= n; i++)
-                S.saveAsset(Object.assign(Object.assign({}, v), { name: n > 1 ? `${v.name} #${i}` : v.name }), user.name);
-            toast(n > 1 ? `${n} demirbaş eklendi` : 'Demirbaş eklendi');
+            const doSave = () => {
+                try {
+                    for (let i = 1; i <= n; i++)
+                        S.saveAsset(Object.assign(Object.assign({}, v), { name: n > 1 ? `${v.name} #${i}` : v.name }), user.name, { quiet: n > 1, noCommit: i < n });
+                    if (n > 1)
+                        S.audit('toplu', 'assets', '', `${n} adet “${v.name}”`);
+                    toast(n > 1 ? `${n} demirbaş eklendi` : 'Demirbaş eklendi');
+                    render();
+                }
+                catch (e) {
+                    if (e.code !== 'numara-yok')
+                        throw e;
+                    S.audit('toplu', 'assets', '', 'yarım kalan ekleme');
+                    toast(NO_NUM);
+                    render();
+                }
+            };
+            if (!Sync.numbersReady('DB', n)) {
+                toast('Demirbaş numarası alınıyor…');
+                Sync.ensureNumbers('DB', n).then(ok => ok ? doSave() : toast(NO_NUM));
+                return;
+            }
+            doSave();
         }, id ? () => S.removeAsset(id) : null);
     }
     // ---------- yazdırılabilir etiket sayfası (seçimli)
@@ -1769,7 +2199,16 @@ var __rest = (this && this.__rest) || function (s, e) {
         syncing: ['Gönderiliyor…', 'warn'], offline: ['Çevrimdışı · sonra gönderilecek', 'off'], error: ['Bağlantı sorunu', 'bad'],
     };
     const syncLabel = () => { const [t, c] = SYNC_TXT[Sync.state.status] || SYNC_TXT.local; return `<span class="sync s-${c}" data-act="go-cloud"><i></i> ${t}</span>`; };
-    Sync.onState(() => { document.querySelectorAll('.topbar .sub').forEach(el => { el.innerHTML = (S.isDemo ? '<span class="demo-pill">DEMO</span>' : '') + syncLabel(); }); if (route() === 'ayarlar' && !document.querySelector('.sheet'))
+    Sync.onState(() => { if (!Sync.cloud && Sync.removedNotice() && user && !S.isDemo) {
+        user = null;
+        try {
+            localStorage.removeItem(UKEY);
+        }
+        catch (e) { }
+        closeSheet(true);
+        render();
+        return;
+    } document.querySelectorAll('.topbar .sub').forEach(el => { el.innerHTML = (S.isDemo ? '<span class="demo-pill">DEMO</span>' : '') + syncLabel(); }); if (route() === 'ayarlar' && !document.querySelector('.sheet'))
         render(); });
     function cloudSection() {
         if (S.isDemo)
@@ -1786,131 +2225,236 @@ var __rest = (this && this.__rest) || function (s, e) {
         <div class="card stack">
           <div style="display:flex;gap:10px;align-items:flex-start"><span style="font-size:26px">☁️</span><div><b>Veriler şu an sadece bu telefonda.</b>
           <div class="small muted">Bulutu kurunca garsonun, nargilecinin ve senin telefonun aynı verileri anında görür. İnternet giderse telefon kaydetmeye devam eder, gelince gönderir.</div></div></div>
-          ${isAdmin() ? `<button class="btn primary block" data-act="cloud-setup">Bulutu kur</button>` : `<div class="small muted">Bu telefonu bağlamak için yöneticiden <b>“Cihaz ekle”</b> karekodunu iste ve telefonun kamerasıyla okut.</div>`}
+          ${isAdmin() ? `<button class="btn primary block" data-act="cloud-setup">Bulutu kur (bu telefon yönetici cihazı olur)</button>` : `<div class="small muted">Bu telefonu bağlamak için yöneticiden <b>davet</b> iste: karekod okutur ya da bağlantı + PIN gönderir.</div>`}
         </div>`;
         }
+        const lv = Sync.level, LV = { owner: ['👑', 'Yönetici cihazı'], admin: ['🔑', 'Yetkili cihaz'], member: ['📱', 'Normal cihaz'] }[lv] || ['📱', 'Cihaz'];
         return `<h2 class="section">Bulut senkronu</h2>
       <div class="card stack">
         <div style="display:flex;gap:10px;align-items:center"><span class="sync-dot s-${cls}"></span><div style="flex:1"><b>${t}</b>
-          <div class="small muted">${st.msg ? esc(st.msg) : st.last ? 'Son eşitleme: ' + ago(st.last) : 'Kafe kodu: ' + esc(c.cafeId)}</div></div></div>
-        ${can('cihaz') ? `<button class="btn primary block" data-act="cloud-add">📱 Cihaz ekle (karekod / bağlantı)</button>` : ''}
+          <div class="small muted">${st.msg ? esc(st.msg) : st.last ? 'Son eşitleme: ' + ago(st.last) : 'Kafe: ' + esc(c.cafeId)}</div></div></div>
+        <div class="small dev-lv">${LV[0]} Bu telefon: <b>${LV[1]}</b></div>
+        ${can('cihaz') ? (Sync.isAdminDevice() ? `<div class="btn-row"><button class="btn primary" data-act="cloud-add">➕ Davet oluştur</button><button class="btn" data-act="devices">📋 Bağlı cihazlar</button></div>`
+            : `<div class="small muted card" style="box-shadow:none;background:var(--bg)">Davet ve cihaz yönetimi sadece <b>yetkili telefonlardan</b> yapılabilir. Bu telefonun yetkili olması için yönetici cihazından “Bağlı cihazlar → Yetkili cihaz yap” denmeli.</div>`) : ''}
         <div class="btn-row"><button class="btn sm" data-act="cloud-push">Şimdi eşitle</button><button class="btn ghost sm" data-act="cloud-leave">Bu cihazı ayır</button></div>
       </div>`;
     }
     function openCloudSetup() {
-        const pre = window.KAFE_FIREBASE && window.KAFE_FIREBASE.apiKey ? window.KAFE_FIREBASE : null;
-        sheet(`
-      <h3>Bulutu kur</h3><div class="sub">Bu işlemi bir kez, yönetici telefonundan yaparsın. Sonra diğer telefonlar karekodla katılır.</div>
-      ${pre ? `<div class="card small" style="box-shadow:none;background:var(--ok-soft)">✅ Firebase projesi hazır: <b>${esc(pre.projectId)}</b></div>`
-            : `<label class="field"><span>Firebase ayarları (firebaseConfig)</span><textarea id="cfgTxt" rows="6" placeholder="const firebaseConfig = {&#10;  apiKey: &quot;...&quot;,&#10;  projectId: &quot;...&quot;,&#10;  appId: &quot;...&quot;&#10;};"></textarea></label>`}
-      <div class="field"><span>Hangi verilerle başlasın?</span>
-        <label class="radio-row"><input type="radio" name="start" value="keep" checked><div><b>Bu telefondaki verilerle</b><small>Şu an ekranda gördüğün her şey buluta yüklenir</small></div></label>
-        <label class="radio-row"><input type="radio" name="start" value="wipe"><div><b>Örnek verileri sil, boş başla</b><small>Bölümler ve kafe kimliği kalır; malzeme, demirbaş, sipariş ve örnek kullanıcılar silinir</small></div></label>
-      </div>
-      <label class="field hidden" id="pinF"><span>Yeni yönetici PIN'i (4 rakam)</span><input id="newPin" inputmode="numeric" maxlength="4" placeholder="örn. 4826"></label>
-      <div class="small muted" id="setupMsg" style="margin-bottom:10px"></div>
+        if (!window.KAFE_FIREBASE)
+            return toast('Bulut ayarı bulunamadı');
+        sheet(`<h3>Bulutu kur</h3><div class="sub">Bunu bir kez, yöneticinin kendi telefonundan yaparsın. Bu telefon <b>yönetici cihazı</b> olur; diğer telefonlar davetle katılır.</div>
+      <div class="card small" style="box-shadow:none;background:var(--ok-soft)">✅ Firebase projesi: <b>${esc(window.KAFE_FIREBASE.projectId)}</b><br>Bu telefondaki veriler buluta yüklenir.</div>
+      <div class="small muted" id="setupMsg" style="margin:10px 0"></div>
       <button class="btn primary block" id="doSetup">Kur ve buluta yükle</button>`, sh => {
-            sh.querySelectorAll('[name=start]').forEach(r => r.onchange = () => sh.querySelector('#pinF').classList.toggle('hidden', r.value !== 'wipe' || !r.checked));
             sh.querySelector('#doSetup').onclick = async () => {
                 const msg = sh.querySelector('#setupMsg'), btn = sh.querySelector('#doSetup');
-                let config;
-                try {
-                    config = pre || Sync.parseConfig(sh.querySelector('#cfgTxt').value);
-                }
-                catch (e) {
-                    msg.textContent = '⚠️ ' + e.message;
-                    return;
-                }
-                const wipe = sh.querySelector('[name=start]:checked').value === 'wipe';
-                const pin = sh.querySelector('#newPin').value.trim();
-                if (wipe && !/^\d{4}$/.test(pin)) {
-                    msg.textContent = '⚠️ Yönetici için 4 haneli yeni bir PIN yaz';
-                    return;
-                }
-                if (wipe && !confirm('Örnek veriler silinecek. Devam edilsin mi?'))
-                    return;
                 btn.disabled = true;
                 btn.textContent = 'Kuruluyor…';
                 msg.textContent = 'Buluta bağlanılıyor…';
                 try {
-                    if (wipe) {
-                        S.wipeDemo(pin);
-                        user = S.get().users[0];
-                        try {
-                            localStorage.setItem(UKEY, user.id);
-                        }
-                        catch (e) { }
-                    }
-                    await Sync.setup({ type: window.__cloudType || 'firebase', config });
+                    await Sync.setup({ type: window.__cloudType || 'firebase', name: S.get().cafe.name, user: user.name });
                     closeSheet();
                     render();
-                    toast('Bulut kuruldu. Şimdi diğer telefonları ekleyebilirsin.');
-                    setTimeout(openAddDevice, 400);
+                    toast('Bulut kuruldu. Şimdi çalışanları davet edebilirsin.');
                 }
                 catch (e) {
                     btn.disabled = false;
                     btn.textContent = 'Tekrar dene';
-                    msg.textContent = '⚠️ Kurulamadı: ' + (e.code || e.message || e) + '. Firebase adımlarını (Anonymous giriş, Firestore, kurallar) kontrol et.';
+                    const m = String(e.code || e.message || e);
+                    msg.textContent = '⚠️ ' + (/permission/i.test(m) ? 'Kurulamadı: kafe zaten kurulmuş olabilir (yeni kafe açılamaz) ya da Firebase kuralları eksik. Bu telefonu davetle bağla.' : 'Kurulamadı: ' + m);
                 }
             };
         });
     }
-    function openAddDevice() {
-        const link = Sync.joinLink(), cafe = S.get().cafe.name;
-        let mode = 'web';
-        const webMsg = () => `${cafe} uygulamasına katılmak için bu bağlantıyı aç:\n${link}\n\niPhone'da Safari'de açınca Paylaş → Ana Ekrana Ekle ile uygulama gibi kurulur.`;
-        const apkMsg = () => `${cafe} Android uygulaması:\n\n1) Uygulamayı indir ve kur:\n${APK_URL}\n(“Bilinmeyen kaynaklara izin ver” sorulursa izin ver)\n\n2) Kurduktan sonra bu katılım bağlantısına dokun, açılan sayfada “Uygulamada aç” de:\n${link}`;
+    // ---------- DAVET: kişiye özel, tek kullanımlık. Karekod 10 dk (PIN içinde), bağlantı 2 saat (PIN ayrı verilir)
+    function openAddDevice(preUser) {
+        if (!Sync.isAdminDevice())
+            return toast('Davet sadece yetkili telefondan oluşturulabilir');
+        const db = S.get(), cafe = db.cafe.name;
+        let who = preUser ? S.user(preUser) : null, mode = 'qr', withApk = false, timer = null;
+        const invs = {};
+        const loginLine = u => u.pinSet ? `Giriş: <b>${esc(u.name)}</b> · kendi PIN’i` : `Giriş: <b>${esc(u.name)}</b> · PIN <b class="code">${esc(u.pin)}</b> <span class="muted">(ilk girişte değiştirecek)</span>`;
         const draw = sh => {
-            var _a;
-            sh.querySelectorAll('[data-dm]').forEach(b => b.classList.toggle('on', b.dataset.dm === mode));
-            sh.querySelector('#dvBody').innerHTML = mode === 'web' ? `
-        <div class="sub" style="margin-top:4px">Garsonun ya da nargilecinin telefonunda kamerayı aç, bu karekodu okut. Açılan sayfada <b>“Katıl”</b> desin, sonra kendi adını ve PIN'ini seçsin. <b>iPhone ve Android</b>'de çalışır.</div>
-        <div class="qr-big join-qr">${makeQR(link)}</div>
-        <div class="small muted" style="margin-top:8px">iPhone'da: bağlantı Safari'de açılınca <b>Paylaş → Ana Ekrana Ekle</b> ile uygulama gibi kurulur.</div>`
-                : `
-        <div class="sub" style="margin-top:4px">Sadece <b>Android</b>. Uygulama kurulur, içerik her açılışta siteden güncel gelir; ayrıca güncellemeye gerek yok.</div>
-        <div class="apk-steps">
-          <div><b>1</b><span>Bu karekodu okut, <b>bambaska.apk</b> inip kurulsun. “Bilinmeyen kaynaklara izin ver” sorulursa izin ver.</span></div>
-          <div class="qr-big join-qr">${makeQR(APK_URL)}</div>
-          <div><b>2</b><span>Uygulamayı aç → <b>Kurulu kafeye bağlan</b> de ve <a href="#" id="dvShowJoin">katılım karekodunu</a> okut. Mesajla gönderirsen katılım bağlantısına dokununca <b>“Uygulamada aç”</b> çıkar.</span></div>
-        </div>`;
-            (_a = sh.querySelector('#dvShowJoin')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', e => { e.preventDefault(); mode = 'web'; draw(sh); });
-            sh.querySelector('#shLink').textContent = mode === 'web' ? 'Bağlantıyı paylaş' : 'APK + bağlantıyı paylaş';
+            clearInterval(timer);
+            const body = sh.querySelector('#ivBody');
+            if (!who) {
+                body.innerHTML = `<div class="field"><span>Kim için?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0">${db.users.map(u => `<button class="chip" data-who="${u.id}">${esc(u.name)} <small class="muted">${roleName(u.role)}</small></button>`).join('')}</div></div>
+          <button class="btn ghost block" data-newp>+ Listede yok: yeni kişi ekle</button>
+          <div class="small muted" style="margin-top:8px">Her telefon için ayrı davet oluşturulur. Davet tek kullanımlıktır.</div>`;
+                body.querySelectorAll('[data-who]').forEach(b => b.onclick = () => { who = S.user(b.dataset.who); delete invs.qr; delete invs.link; draw(sh); ensure(sh); });
+                body.querySelector('[data-newp]').onclick = () => { closeSheet(true); editUser(null); toast('Kişiyi kaydettikten sonra tekrar “Davet oluştur” de'); };
+                return;
+            }
+            const inv = invs[mode];
+            body.innerHTML = `<div class="iv-who"><span>👤 <b>${esc(who.name)}</b> için davet</span><button class="btn ghost sm" data-chg>Değiştir</button></div>
+        <div class="seg" style="margin:8px 0 12px"><button data-md="qr" class="${mode === 'qr' ? 'on' : ''}">📷 Yüz yüze karekod</button><button data-md="link" class="${mode === 'link' ? 'on' : ''}">💬 Bağlantı + PIN</button></div>
+        <div id="ivIn">${inv ? '' : '<div class="empty small">Davet hazırlanıyor…</div>'}</div>`;
+            body.querySelector('[data-chg]').onclick = () => { who = null; draw(sh); };
+            body.querySelectorAll('[data-md]').forEach(b => b.onclick = () => { mode = b.dataset.md; draw(sh); ensure(sh); });
+            if (!inv)
+                return;
+            const box = body.querySelector('#ivIn');
+            const left = () => Math.max(0, inv.exp - Date.now());
+            const mmss = ms => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+            if (mode === 'qr') {
+                box.innerHTML = `<div class="sub" style="margin-top:0">${esc(who.name)} telefonunun kamerasıyla bu karekodu okutsun, açılan sayfada <b>Katıl</b> desin.</div>
+          <div class="qr-big join-qr">${makeQR(Sync.inviteLink(inv, true))}</div>
+          <div class="iv-timer" id="ivT"></div>
+          <div class="card small" style="box-shadow:none;background:var(--bg);margin-top:10px">${loginLine(who)}</div>`;
+            }
+            else {
+                const link = Sync.inviteLink(inv, false);
+                const m1 = `Merhaba ${who.name} 👋 ${cafe} uygulamasına davetlisin.\n\n1️⃣ Bu bağlantıyı aç:\n${link}\n2️⃣ Açılan sayfaya sana ayrıca verilen 6 haneli katılım PIN’ini gir.\n3️⃣ Listeden adını seç ve giriş PIN’inle gir.\n\nKatılım PIN’i tek kullanımlıktır, 2 saat geçerlidir.` + (withApk ? `\n\n🤖 Android uygulaması (isteğe bağlı): ${APK_URL}` : '');
+                const m2 = `🔑 Katılım PIN’in: ${inv.pin.slice(0, 3)} ${inv.pin.slice(3)} (tek kullanımlık, 2 saat geçerli)\n👤 Giriş: ${who.name}` + (who.pinSet ? ' · kendi PIN’in' : ` · PIN ${who.pin}\nİlk girişte kendi PIN’ini belirleyeceksin.`);
+                box.innerHTML = `<div class="iv-pin">${inv.pin.slice(0, 3)} ${inv.pin.slice(3)}</div><div class="iv-timer" id="ivT"></div>
+          <div class="card small" style="box-shadow:none;background:var(--bg);margin:10px 0">${loginLine(who)}</div>
+          <div class="small muted" style="margin-bottom:8px">⚠️ Bağlantıyı ve PIN’leri <b>ayrı yollardan</b> gönder. Bağlantı ileri gönderilse bile PIN’i bilmeyen giremez.</div>
+          <label class="radio-row" style="margin-bottom:8px"><input type="checkbox" id="ivApk" ${withApk ? 'checked' : ''}><span><b>Android uygulaması (APK) bağlantısını da ekle</b></span></label>
+          <button class="btn wa block" data-sh="1">1️⃣ Bağlantıyı gönder (WhatsApp)</button>
+          <button class="btn block" style="margin-top:8px" data-sh="2">2️⃣ PIN’leri gönder (SMS / ayrı mesaj)</button>
+          <button class="btn ghost block" style="margin-top:6px" data-cp="2">PIN mesajını kopyala</button>`;
+                box.querySelector('#ivApk').onchange = e => { withApk = e.target.checked; draw(sh); };
+                box.querySelector('[data-sh="1"]').onclick = () => shareText(cafe, m1);
+                box.querySelector('[data-sh="2"]').onclick = () => { if (!inApk() && isAndroid() && !navigator.share)
+                    location.href = 'sms:?body=' + encodeURIComponent(m2);
+                else
+                    shareText(cafe, m2); };
+                box.querySelector('[data-cp="2"]').onclick = () => copyText(m2);
+            }
+            const tick = () => {
+                const el = sh.querySelector('#ivT');
+                if (!el)
+                    return clearInterval(timer);
+                const l = left();
+                el.innerHTML = l ? `⏱️ ${mode === 'qr' ? mmss(l) : Math.ceil(l / 60000) + ' dk'} içinde kullanılmalı · tek kullanımlık` : '⌛ Süresi doldu. <button class="btn sm" data-renew>Yenile</button>';
+                const r = el.querySelector('[data-renew]');
+                if (r)
+                    r.onclick = () => { delete invs[mode]; draw(sh); ensure(sh); };
+            };
+            tick();
+            timer = setInterval(tick, 1000);
         };
-        sheet(`
-      <h3>Cihaz ekle</h3>
-      <div class="seg" style="margin:6px 0 4px"><button data-dm="web">🌐 Web bağlantısı</button><button data-dm="apk">🤖 Android uygulaması (APK)</button></div>
-      <div id="dvBody"></div>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn" id="cpLink">Kopyala</button>
-        <button class="btn wa" id="shLink"></button>
-      </div>
-      <div class="card small" style="margin-top:12px;box-shadow:none;background:var(--warn-soft)">🔐 Katılım bağlantısı kafenin anahtarıdır. Sadece çalışanlarla paylaş; sosyal medyaya koyma.</div>`, sh => {
-            draw(sh);
-            sh.querySelectorAll('[data-dm]').forEach(b => b.onclick = () => { mode = b.dataset.dm; draw(sh); });
-            sh.querySelector('#cpLink').onclick = () => copyText(mode === 'web' ? link : apkMsg());
-            sh.querySelector('#shLink').onclick = () => shareText(cafe, mode === 'web' ? webMsg() : apkMsg());
+        const ensure = async (sh) => {
+            if (!who || invs[mode])
+                return;
+            try {
+                const inv = await Sync.createInvite({ mode, forUser: who.id, forName: who.name, byName: user.name });
+                invs[mode] = inv;
+                if (!who.pinSet && !who.mustChangePin)
+                    S.upsert('users', { id: who.id, mustChangePin: true }, { quiet: true });
+                S.audit('davet', 'invites', inv.id.split('-')[0], `${who.name} için davet oluşturdu (${mode === 'qr' ? 'karekod, 10 dk' : 'bağlantı + PIN, 2 saat'})`);
+                draw(sh);
+            }
+            catch (e) {
+                const el = sh.querySelector('#ivIn');
+                if (el)
+                    el.innerHTML = `<div class="empty small">⚠️ Davet oluşturulamadı: ${esc(/permission/i.test(String(e.code || e.message)) ? 'bu telefon yetkili değil' : /network|fetch|offline|unavailable/i.test(String(e.message)) ? 'internet yok' : String(e.message || e))}</div>`;
+            }
+        };
+        sheet(`<h3>➕ Davet oluştur</h3><div class="sub">Yeni bir telefonu kafeye bağlamak için. Kişiye özel ve tek kullanımlık.</div><div id="ivBody"></div>
+      <button class="btn ghost block" style="margin-top:12px" data-act="devices">📋 Bağlı cihazlar ve açık davetler</button>`, sh => { draw(sh); ensure(sh); }, { onClose: () => clearInterval(timer) });
+    }
+    // ---------- BAĞLI CİHAZLAR (yetkili telefon)
+    async function openDevices() {
+        if (!Sync.isAdminDevice())
+            return toast('Sadece yetkili telefondan görülebilir');
+        sheet(`<h3>📋 Bağlı cihazlar</h3><div class="sub">Kafeye bağlı telefonlar. Tanımadığın ya da kaybolan telefonu çıkar.</div><div id="dvList"><div class="empty small">Yükleniyor…</div></div>`, async (sh) => {
+            let devs = [], invs = [];
+            try {
+                [devs, invs] = await Promise.all([Sync.devices(), Sync.invites()]);
+            }
+            catch (e) {
+                sh.querySelector('#dvList').innerHTML = `<div class="empty small">⚠️ Liste alınamadı: ${esc(String(e.message || e))}</div>`;
+                return;
+            }
+            const me = Sync.uid, owners = devs.filter(d => d.level === 'owner').length;
+            const LVL = { owner: ['👑', 'Yönetici cihazı'], admin: ['🔑', 'Yetkili'], member: ['📱', 'Normal'] };
+            devs.sort((a, b) => (b.uid === me) - (a.uid === me) || (b.lastSeen || 0) - (a.lastSeen || 0));
+            const openInv = invs.filter(i => !i.usedBy && i.exp > Date.now());
+            sh.querySelector('#dvList').innerHTML = `<div class="list">${devs.map(d => `<button class="row" data-dv="${esc(d.uid)}">
+          <span style="font-size:22px">${(LVL[d.level] || LVL.member)[0]}</span>
+          <div class="main"><div class="t">${esc(d.device || 'Cihaz')}${d.uid === me ? ' <span class="badge st-iyi">bu telefon</span>' : ''}</div>
+            <div class="s">${(LVL[d.level] || LVL.member)[1]} · son giriş: ${esc(d.lastUser || '—')} · ${d.lastSeen ? ago(d.lastSeen) : '—'}</div>
+            <div class="s muted">${!d.invitedBy ? (d.level === 'owner' ? 'kafeyi kuran telefon' : '') : `${d.inviteName ? esc(d.inviteName) + ' için davet · ' : ''}${esc(d.invitedBy)} davet etti`}</div></div><span class="muted">›</span></button>`).join('')}</div>
+        <h2 class="section">Açık davetler</h2>
+        <div class="list">${openInv.map(i => `<div class="row"><span style="font-size:20px">${i.mode === 'qr' ? '📷' : '💬'}</span><div class="main"><div class="t">${esc(i.forName || '—')}</div><div class="s">${esc(i.byName || '')} · ${Math.ceil((i.exp - Date.now()) / 60000)} dk kaldı</div></div><button class="btn ghost sm" data-ci="${esc(i.id)}">İptal</button></div>`).join('') || '<div class="empty small">Açık davet yok</div>'}</div>`;
+            sh.querySelectorAll('[data-ci]').forEach(b => b.onclick = async () => { try {
+                await Sync.cancelInvite(b.dataset.ci);
+                toast('Davet iptal edildi');
+            }
+            catch (e) {
+                toast('İptal edilemedi');
+            } openDevices(); });
+            sh.querySelectorAll('[data-dv]').forEach(b => b.onclick = () => deviceSheet(devs.find(d => d.uid === b.dataset.dv), owners));
+        });
+    }
+    function deviceSheet(d, owners) {
+        const me = d.uid === Sync.uid, own = Sync.isOwnerDevice();
+        const canRemove = !(d.level === 'owner' && (!own || owners <= 1));
+        const LV = [['owner', '👑 Yönetici cihazı yap', 'Davet, cihaz çıkarma ve yetki verme'], ['admin', '🔑 Yetkili cihaz yap', 'Davet oluşturabilir, cihaz çıkarabilir'], ['member', '📱 Normal cihaz yap', 'Sadece kendi işini yapar']];
+        sheet(`<h3>${esc(d.device || 'Cihaz')}</h3><div class="sub">Son giriş: <b>${esc(d.lastUser || '—')}</b> · ${d.lastSeen ? ago(d.lastSeen) : '—'}${me ? ' · bu telefon' : ''}</div>
+      ${own ? `<div class="field"><span>Yetki</span>${LV.map(([k, l, h]) => `<label class="radio-row"><input type="radio" name="lv" value="${k}" ${d.level === k ? 'checked' : ''} ${me && d.level === 'owner' && owners <= 1 && k !== 'owner' ? 'disabled' : ''}><span><b>${l}</b><small>${h}</small></span></label>`).join('')}</div>`
+            : `<div class="small muted" style="margin-bottom:10px">Yetkiyi sadece yönetici cihazı değiştirebilir.</div>`}
+      ${canRemove && !me ? `<button class="btn danger block" id="dvRm">Bu cihazı çıkar</button><div class="small muted" style="margin-top:6px">Telefon internete bağlandığı ilk anda kafe verilerini kendinden siler.</div>`
+            : d.level === 'owner' && !me ? `<div class="small muted">Yönetici cihazını sadece yönetici cihazı çıkarabilir${owners <= 1 ? '; son yönetici cihazı çıkarılamaz' : ''}.</div>` : ''}`, sh => {
+            var _a;
+            sh.querySelectorAll('[name=lv]').forEach(r => r.onchange = async () => {
+                try {
+                    await Sync.setDeviceLevel(d.uid, r.value);
+                    S.audit('cihaz', 'devices', d.uid, `${d.device || 'Cihaz'} → ${LV.find(x => x[0] === r.value)[1].replace(/^\S+ /, '').replace(' yap', '')}`);
+                    toast('Yetki güncellendi');
+                    if (me)
+                        Sync.refreshMe();
+                    openDevices();
+                }
+                catch (e) {
+                    toast('Değiştirilemedi: ' + (e.code || e.message));
+                }
+            });
+            (_a = sh.querySelector('#dvRm')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', async () => {
+                if (!confirm(`${d.device || 'Bu cihaz'} kafeden çıkarılsın mı?`))
+                    return;
+                try {
+                    await Sync.removeDevice(d.uid);
+                }
+                catch (e) {
+                    return toast('Çıkarılamadı: ' + (e.code || e.message));
+                }
+                S.audit('cihaz', 'devices', d.uid, `Cihaz çıkarıldı: ${d.device || 'Cihaz'}${d.lastUser ? ' · son kullanıcı ' + d.lastUser : ''}`);
+                const u = d.lastUser && S.get().users.find(x => x.name === d.lastUser);
+                if (u && confirm(`Bu telefonda son giriş yapan ${u.name}. ${u.name}’in PIN’i yenilensin mi? (Telefon kaybolduysa önerilir)`)) {
+                    const np = String(Math.floor(1000 + Math.random() * 9000));
+                    S.upsert('users', { id: u.id, pin: np, pinSet: false, mustChangePin: true });
+                    sheet(`<h3>Yeni PIN</h3><div class="sub">${esc(u.name)} bir sonraki girişte bunu kullanacak ve hemen değiştirecek.</div><div class="iv-pin">${np}</div>`);
+                }
+                else {
+                    toast('Cihaz çıkarıldı');
+                    openDevices();
+                }
+            });
         });
     }
     // #/katil/<kod> : başka telefondan gelen katılım bağlantısı (giriş yapmadan da açılır)
     function renderJoin() {
-        var _a, _b;
         let p = null;
         try {
             p = Sync.decodeJoin(routeArg());
         }
         catch (e) { }
         const db = S.get(), same = Sync.cloud && p && Sync.cloud.cafeId === p.id;
+        const old = p && (p.k || !p.t);
         $app.innerHTML = `
       <div class="login join">
         <div class="login-glow"></div>
         <div class="login-top">${cafeMode() === 'name' ? `<div class="brand-mark"><img src="icon.svg" alt=""></div>` : `<div class="brand-logo bg-${db.cafe.logoBg || 'light'}"><img src="${db.cafe.logo}" alt=""></div>`}
-          <div><div class="login-cafe">Kafeye katıl</div><div class="login-tag">Bu telefon kafenin ortak verilerine bağlanacak</div></div></div>
-        ${!p ? `<div class="join-box"><b>Bağlantı bozuk.</b><p>Yöneticiden “Cihaz ekle” karekodunu yeniden okutmasını iste.</p><button class="btn block" data-act="join-cancel">Geri</button></div>`
-            : same ? `<div class="join-box"><b>Bu telefon zaten bağlı ✓</b><p>Kafe kodu: ${esc(p.id)}</p><button class="btn primary block" data-act="join-cancel">Uygulamaya geç</button></div>`
-                : `<div class="join-box">
-              <div class="jb-row"><span>Kafe kodu</span><b>${esc(p.id)}</b></div>
-              <div class="jb-row"><span>Bulut projesi</span><b>${esc(((_a = p.c) === null || _a === void 0 ? void 0 : _a.projectId) || ((_b = window.KAFE_FIREBASE) === null || _b === void 0 ? void 0 : _b.projectId) || '—')}</b></div>
+          <div><div class="login-cafe">Kafeye katıl</div><div class="login-tag">${esc(window.KAFE_NAME || db.cafe.name)}</div></div></div>
+        ${!p ? `<div class="join-box"><b>Bağlantı bozuk.</b><p>Yöneticiden yeni bir davet iste.</p><button class="btn block" data-act="join-cancel">Geri</button></div>`
+            : old ? `<div class="join-box"><b>Bu bağlantı eski.</b><p>Kafe daha güvenli bir davet sistemine geçti. Yöneticiden <b>yeni bir davet</b> iste.</p><button class="btn block" data-act="join-cancel">Geri</button></div>`
+                : same ? `<div class="join-box"><b>Bu telefon zaten bağlı ✓</b><button class="btn primary block" data-act="join-cancel">Uygulamaya geç</button></div>`
+                    : `<div class="join-box">
+              ${p.n ? `<div class="jb-row"><span>Davet</span><b>${esc(p.n)} için</b></div>` : ''}${p.b ? `<div class="jb-row"><span>Davet eden</span><b>${esc(p.b)}</b></div>` : ''}
+              ${p.p ? '' : `<label class="jb-pin"><span>6 haneli katılım PIN’i</span><input id="joinPin" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="••• •••"></label>
+                <div class="small" style="opacity:.75;margin:-4px 0 10px">PIN sana bağlantıdan ayrı olarak verildi (yüz yüze, telefonla ya da SMS ile).</div>`}
               <p>${Sync.cloud ? '⚠️ Bu telefon başka bir kafeye bağlı; o bağlantı kapanacak.' : 'Bu telefondaki deneme verileri silinip yerine kafenin gerçek verileri gelecek.'}</p>
               <div class="join-msg" id="joinMsg"></div>
               <button class="btn primary block big-btn" data-act="join-go">Katıl</button>
@@ -1919,36 +2463,52 @@ var __rest = (this && this.__rest) || function (s, e) {
               <button class="btn ghost block" data-act="join-cancel" style="margin-top:6px;color:inherit">Vazgeç</button>
             </div>`}
       </div>`;
+        const pi = document.getElementById('joinPin');
+        if (pi) {
+            pi.oninput = () => { const d = pi.value.replace(/\D/g, '').slice(0, 6); pi.value = d.length > 3 ? d.slice(0, 3) + ' ' + d.slice(3) : d; };
+            pi.onkeydown = e => { if (e.key === 'Enter')
+                doJoin(); };
+        }
         return p;
     }
     async function doJoin() {
         const p = Sync.decodeJoin(routeArg());
-        const btn = document.querySelector('[data-act=join-go]'), msg = document.getElementById('joinMsg');
+        const btn = document.querySelector('[data-act=join-go]'), msg = document.getElementById('joinMsg'), pi = document.getElementById('joinPin');
+        const pin = p.p || (pi ? pi.value.replace(/\D/g, '') : '');
+        if (pin.length !== 6) {
+            msg.textContent = '⚠️ 6 haneli katılım PIN’ini gir';
+            return;
+        }
         btn.disabled = true;
         btn.textContent = 'Bağlanıyor…';
         msg.textContent = '';
         try {
-            await Sync.join(p);
+            await Sync.join(p, pin);
             user = null;
             try {
                 localStorage.removeItem(UKEY);
+                if (p.u)
+                    localStorage.setItem(LKEY, p.u);
             }
             catch (e) { }
             msg.textContent = 'Veriler indiriliyor…';
-            // kullanıcı listesi gelene kadar kısa bekle
-            for (let i = 0; i < 40 && !S.get().users.length; i++)
+            for (let i = 0; i < 60 && !S.get().users.length; i++)
                 await new Promise(r => setTimeout(r, 150));
+            Sync.deviceName().then(dn => S.audit('cihaz', 'devices', Sync.uid || '', `Yeni cihaz bağlandı: ${dn}${p.n ? ' · ' + p.n + ' için davet' : ''}${p.b ? ' (' + p.b + ')' : ''}`));
             history.replaceState(null, '', '#/home');
+            if (p.u && S.user(p.u))
+                loginUser = p.u;
             render();
-            toast('Kafeye bağlandın. Adını seç ve PIN\'ini gir.');
+            toast('Kafeye bağlandın. PIN’ini gir.');
         }
         catch (e) {
             btn.disabled = false;
             btn.textContent = 'Tekrar dene';
             const m = String(e.code || e.message || e);
-            msg.textContent = '⚠️ ' + (/eski-tarayici/.test(m) ? 'Bu cihaz çok eski: bulut bağlantısı için iOS 11.3 veya üstü gerekiyor. Uygulama bu cihazda sadece demo olarak açılır.'
-                : 'Katılamadı: ' + (/permission/i.test(m) ? 'kod geçersiz ya da kafe silinmiş'
-                    : /Failed to fetch|NetworkError|Load failed|network/i.test(m) ? 'internete bağlanılamadı. Bağlantıyı kontrol edip tekrar dene.' : m));
+            msg.textContent = '⚠️ ' + (/eski-tarayici/.test(m) ? 'Bu cihaz çok eski: bulut bağlantısı için iOS 11.3 veya üstü gerekiyor.'
+                : /eski-baglanti/.test(m) ? 'Bu bağlantı eski. Yöneticiden yeni davet iste.'
+                    : /permission|not-found|NOT_FOUND/i.test(m) ? 'Katılamadı: PIN yanlış, süresi dolmuş ya da davet daha önce kullanılmış. Yöneticiden yeni davet iste.'
+                        : /Failed to fetch|NetworkError|Load failed|network/i.test(m) ? 'İnternete bağlanılamadı. Bağlantıyı kontrol edip tekrar dene.' : 'Katılamadı: ' + m);
         }
     }
     // ---------- BİLDİRİMLER
@@ -1999,6 +2559,12 @@ var __rest = (this && this.__rest) || function (s, e) {
             else if (l.action === 'kismi_teslim' && (isMine(o) || can('siparis_onay') || isDev()))
                 out.push({ id, at: l.at, icon: '⚠️', title: `${o.no} kısmen geldi`, body: `${supName(o)} · ${l.user} · kalan bekleniyor`, hash: '#/siparis', tab: 'yolda' });
         }));
+        if (isAdmin() || can('cihaz') || isDev())
+            (db.audit || []).forEach(a => {
+                if (a.action !== 'cihaz' || !a.at || a.at < since || a.by === me || !/^Yeni cihaz/.test(a.name || ''))
+                    return;
+                out.push({ id: 'd:' + a.id, at: a.at, icon: '📱', title: a.name, body: 'Tanımıyorsan Ayarlar → Bağlı cihazlar’dan çıkar', hash: '#/ayarlar' });
+            });
         (db.tickets || []).forEach(t => (t.log || []).forEach((l, i) => {
             var _a;
             if (!l.at || l.at < since || l.user === me)
@@ -2190,7 +2756,7 @@ var __rest = (this && this.__rest) || function (s, e) {
       <div class="skins">${SKINS.map(t => `<button class="skin ${cur === t.id ? 'on' : ''}" data-act="skin" data-id="${t.id}">
         <span class="sw"><i style="background:${t.c[0]}"></i><i style="background:${t.c[1]}"></i><i style="background:${t.c[2]}"></i></span>
         <b>${t.name}</b>${t.d ? `<small>${t.d}</small>` : ''}</button>`).join('')}</div>`;
-        const sec = (title, act, rows, ok = true) => `<h2 class="section">${title}${ok ? '' : ' <span class="ro-tag">salt okunur</span>'}</h2><div class="list">${ok ? rows : rows.replace(/data-act="(edit-[a-z]+|manage-items|tpl-import)"/g, 'data-act="ro"')}${ok ? `<button class="row" data-act="${act}" style="color:var(--accent);font-weight:700">+ Ekle</button>` : ''}</div>`;
+        const sec = (title, act, rows, ok = true) => `<h2 class="section">${title}${ok ? '' : ' <span class="ro-tag">salt okunur</span>'}</h2><div class="list">${ok ? rows : rows.replace(/data-act="(edit-[a-z]+|manage-items|tpl-import|paste-items)"/g, 'data-act="ro"')}${ok ? `<button class="row" data-act="${act}" style="color:var(--accent);font-weight:700">+ Ekle</button>` : ''}</div>`;
         let out = profile + cloudSection() + notifySection();
         if (isAdmin())
             out += `
@@ -2200,7 +2766,7 @@ var __rest = (this && this.__rest) || function (s, e) {
         <div class="main"><div class="t">${esc(db.cafe.name)}</div><div class="s">Logo ve isim · ${CAFE_MODES.find(x => x[0] === cafeMode())[1]}</div></div><span class="muted">›</span></button></div>
       ${sec('Kullanıcılar ve yetkiler', 'new-user', `<button class="row pin-toggle" data-act="show-pins"><span style="font-size:18px">${ui.showPins ? '🙈' : '👁️'}</span><div class="main"><div class="t">${ui.showPins ? "PIN'leri gizle" : "PIN'leri göster"}</div><div class="s">Sadece yönetici görebilir</div></div></button>` + db.users.map(u => `<button class="row" data-act="edit-user" data-id="${u.id}"><div class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(u.name))}</div><div class="main"><div class="t">${esc(u.name)} <span class="role-tag r-${u.role}">${roleName(u.role)}</span></div><div class="s">${u.role === 'yonetici' ? 'Tüm yetkiler' : esc(permSummary(u))}</div></div><span class="pin-chip ${ui.showPins ? 'on' : ''}">${ui.showPins ? esc(u.pin) : '••••'}</span><span class="muted">›</span></button>`).join(''))}`;
         if (can('malzeme') || isDev())
-            out += sec('Malzemeler', 'new-item', `<button class="row" data-act="tpl-import" style="color:var(--accent);font-weight:700">📋 Örnek listeden ekle</button>` + db.depts.map(d => {
+            out += sec('Malzemeler', 'new-item', `<button class="row" data-act="tpl-import" style="color:var(--accent);font-weight:700">📋 Örnek listeden ekle</button><button class="row" data-act="paste-items" style="color:var(--accent);font-weight:700">📥 Excel’den yapıştır</button>` + db.depts.map(d => {
                 const n = db.items.filter(i => i.deptId === d.id).length;
                 return `<button class="row" data-act="manage-items" data-id="${d.id}"><span style="font-size:20px">${d.icon}</span><div class="main"><div class="t">${esc(d.name)}</div><div class="s">${n} malzeme</div></div><span class="muted">›</span></button>`;
             }).join(''), can('malzeme'));
@@ -2218,12 +2784,21 @@ var __rest = (this && this.__rest) || function (s, e) {
         if (isAdmin())
             out += `
       <h2 class="section">Veri</h2>
+      ${Sync.cloud ? '<div class="card small bk-info" id="bkInfo" style="margin-bottom:10px">☁️ Otomatik yedek durumu alınıyor…</div>' : ''}
+      <div class="list" style="margin-bottom:10px">
+        <button class="row" data-act="audit"><span style="font-size:20px">📜</span><div class="main"><div class="t">İşlem geçmişi</div><div class="s">Son 30 gün · kim neyi değiştirdi</div></div><span class="muted">›</span></button>
+        <button class="row" data-act="trash"><span style="font-size:20px">🗑️</span><div class="main"><div class="t">Çöp kutusu</div><div class="s">${(S.get().trash || []).length} kayıt · 30 gün içinde geri alınabilir</div></div><span class="muted">›</span></button>
+      </div>
       <div class="card stack small">
         <div>Tüm verileri (malzeme, sipariş, demirbaş, geçmiş) tek dosya olarak telefona indirir.</div>
-        <div class="btn-row"><button class="btn sm" data-act="export">Yedek indir</button>${S.isDemo ? '' : `<button class="btn danger sm" data-act="reset-cafe">Kafeyi sıfırla</button>`}</div>
+        <div class="btn-row"><button class="btn sm" data-act="export">Yedek indir</button>${S.isDemo ? '' : `<button class="btn sm" data-act="restore">Yedekten geri yükle</button><button class="btn danger sm" data-act="reset-cafe">Kafeyi sıfırla</button>`}</div>
+        ${!S.isDemo && Sync.cloud && !Sync.isOwnerDevice() ? '<div class="small muted">Geri yükleme ve sıfırlama sadece <b>yönetici cihazından</b> yapılabilir.</div>' : ''}
       </div>`;
+        if (isDev() && !isAdmin())
+            out += `<h2 class="section">Kayıtlar</h2><div class="list"><button class="row" data-act="audit"><span style="font-size:20px">📜</span><div class="main"><div class="t">İşlem geçmişi</div><div class="s">Son 30 gün</div></div><span class="muted">›</span></button></div>`;
         if (!isAdmin() && !isDev() && !canAnyRecords())
             out += `<div class="empty small">Malzeme, tedarikçi ve kullanıcı ayarlarını yetkili kişiler değiştirebilir.</div>`;
+        out += `<div class="ver-line"><button data-act="news">Sürüm ${APP_VERSION} · Yenilikler</button></div>`;
         return out;
     }
     function permSummary(u) {
@@ -2231,10 +2806,10 @@ var __rest = (this && this.__rest) || function (s, e) {
         const depts = (u.deptIds || []).map(d => { var _a; return (_a = S.dept(d)) === null || _a === void 0 ? void 0 : _a.name; }).filter(Boolean);
         return [depts.length && !p.sayim_tum ? 'Sayım: ' + depts.join(', ') : p.sayim_tum ? 'Tüm bölümler' : '', `${on.length} yetki`].filter(Boolean).join(' · ');
     }
-    function openMyPin() {
+    function openMyPin(forced) {
         sheet(`
-      <h3>PIN'imi değiştir</h3><div class="sub">${esc(user.name)} · yeni PIN bir sonraki girişte geçerli</div>
-      <label class="field"><span>Şu anki PIN</span><input id="pOld" inputmode="numeric" maxlength="4" type="password" autocomplete="off"></label>
+      <h3>${forced ? '🔐 Kendi PIN’ini belirle' : 'PIN’imi değiştir'}</h3><div class="sub">${esc(user.name)} · ${forced ? 'sana verilen geçici PIN’i değiştirmeden devam edemezsin. Yeni PIN’i sadece sen bileceksin (yönetici de görebilir).' : 'yeni PIN bir sonraki girişte geçerli'}</div>
+      ${forced ? '<input id="pOld" type="hidden">' : '<label class="field"><span>Şu anki PIN</span><input id="pOld" inputmode="numeric" maxlength="4" type="password" autocomplete="off"></label>'}
       <div class="field-row" style="grid-template-columns:1fr 1fr">
         <label class="field"><span>Yeni PIN</span><input id="pNew" inputmode="numeric" maxlength="4" type="password" autocomplete="off"></label>
         <label class="field"><span>Yeni PIN tekrar</span><input id="pNew2" inputmode="numeric" maxlength="4" type="password" autocomplete="off"></label>
@@ -2244,7 +2819,7 @@ var __rest = (this && this.__rest) || function (s, e) {
             sh.querySelector('#pGo').onclick = () => {
                 const v = id => sh.querySelector(id).value.trim(), msg = sh.querySelector('#pMsg');
                 const me = S.user(user.id);
-                if (v('#pOld') !== me.pin)
+                if (!forced && v('#pOld') !== me.pin)
                     return (msg.textContent = '⚠️ Şu anki PIN yanlış');
                 if (!/^\d{4}$/.test(v('#pNew')))
                     return (msg.textContent = '⚠️ Yeni PIN 4 rakam olmalı');
@@ -2254,29 +2829,36 @@ var __rest = (this && this.__rest) || function (s, e) {
                     return (msg.textContent = '⚠️ Yeni PIN eskisiyle aynı');
                 if (!S.isDemo && v('#pNew') === '0000')
                     return (msg.textContent = '⚠️ 0000 demo için ayrıldı');
-                S.upsert('users', Object.assign(Object.assign({}, me), { pin: v('#pNew') }));
+                S.upsert('users', Object.assign(Object.assign({}, me), { pin: v('#pNew'), pinSet: true, mustChangePin: false }));
                 user = S.user(user.id);
-                closeSheet();
+                closeSheet(true);
                 render();
                 toast('PIN değiştirildi');
             };
-        });
+        }, forced ? { locked: true } : undefined);
     }
     // ---------- alt sayfa (sheet)
-    function sheet(html, onMount) {
+    function sheet(html, onMount, opts = {}) {
         closeSheet(true);
         const scrim = document.createElement('div');
         scrim.className = 'scrim';
         const sh = document.createElement('div');
-        sh.className = 'sheet';
+        sh.className = 'sheet' + (opts.locked ? ' locked' : '');
         sh.innerHTML = `<div class="grab"></div>${html}`;
+        if (opts.onClose)
+            sh._onClose = opts.onClose;
         document.body.append(scrim, sh);
-        scrim.onclick = () => closeSheet();
+        scrim.onclick = () => { if (!opts.locked)
+            closeSheet(); };
         requestAnimationFrame(() => { scrim.classList.add('show'); sh.classList.add('show'); });
         onMount === null || onMount === void 0 ? void 0 : onMount(sh);
         return sh;
     }
     function closeSheet(instant) {
+        document.querySelectorAll('.sheet').forEach(el => { try {
+            el._onClose && el._onClose();
+        }
+        catch (e) { } });
         document.querySelectorAll('.scrim,.sheet').forEach(el => {
             if (instant)
                 return el.remove();
@@ -2795,7 +3377,16 @@ var __rest = (this && this.__rest) || function (s, e) {
     }
     const hasIssues = o => o.lines.some(l => l.issues && l.issues.length);
     // ---------- olaylar
+    function bkText(b) {
+        if (!b || !b.at)
+            return '☁️ Otomatik gece yedeği henüz kurulmadı ya da hiç çalışmadı.';
+        const late = Date.now() - b.at > 36 * 3600e3;
+        return `${b.ok && !late ? '✅' : '⚠️'} Son otomatik yedek: <b>${ago(b.at)}</b>${b.ok ? '' : ' · <b>alınamadı</b>'}${late ? ' · <b>1 günden eski!</b>' : ''}<div class="muted" style="margin-top:2px">${esc(b.note || '')}</div>`;
+    }
     function afterRender(r) {
+        if (r === 'ayarlar' && document.getElementById('bkInfo'))
+            Sync.backupInfo().then(b => { window.__bk = b; const el = document.getElementById('bkInfo'); if (el)
+                el.innerHTML = bkText(b); });
         if (r === 'stok') {
             const q = document.getElementById('stokQ');
             q.oninput = () => { ui.stokQ = q.value; const pos = q.selectionStart; render(); const n = document.getElementById('stokQ'); n.focus(); n.setSelectionRange(pos, pos); };
@@ -2856,7 +3447,10 @@ var __rest = (this && this.__rest) || function (s, e) {
             'exit-demo': () => S.setMode('real'),
             'setup-new': () => openSetupNew(),
             'tpl-import': () => openTemplate(),
-            'reset-cafe': () => openResetCafe(),
+            'reset-cafe': () => { if (Sync.cloud && !Sync.isOwnerDevice())
+                return toast('Kafeyi sıfırlama sadece yönetici cihazından yapılabilir'); openResetCafe(); },
+            restore: () => { if (Sync.cloud && !Sync.isOwnerDevice())
+                return toast('Geri yükleme sadece yönetici cihazından yapılabilir'); openRestore(); },
             'ob-hide': () => { try {
                 localStorage.setItem('kafestok.onboardHide', '1');
             }
@@ -2874,6 +3468,12 @@ var __rest = (this && this.__rest) || function (s, e) {
             catch (e) { } render(); },
             'open-dept': () => { ui.stokDept = id; location.hash = '#/stok'; },
             'go-yolda': () => { ui.sipTab = 'yolda'; },
+            'paste-items': () => openPaste('items'),
+            'paste-assets': () => openPaste('assets'),
+            trash: () => openTrash(),
+            audit: () => openAudit(),
+            news: () => openNews(),
+            'news-ok': () => { setSeen(); render(); },
             'go-tedarik': () => { ui.sipTab = 'tedarik'; },
             'contact-tel': () => { S.logContact(id, user.name, 'tel'); setTimeout(render, 300); },
             'contact-wa': () => { const o = S.order(id); S.logContact(id, user.name, 'wa'); window.open(`https://wa.me/${S.supplier(o.supplierId).phone}?text=${encodeURIComponent(textForOrder(o))}`, '_blank'); render(); toast('İletildi olarak kaydedildi · cevap gelince "Sonucu gir"'); },
@@ -2985,11 +3585,19 @@ var __rest = (this && this.__rest) || function (s, e) {
             'cloud-setup': () => openCloudSetup(),
             'cloud-add': () => openAddDevice(),
             'cloud-push': () => { Sync.pushNow(); toast('Eşitleniyor…'); },
-            'cloud-leave': () => { if (confirm('Bu telefon buluttan ayrılacak. Veriler telefonda kalır ama artık diğer cihazlarla eşitlenmez. Devam?')) {
-                Sync.leave();
-                render();
-                toast('Buluttan ayrıldı');
-            } },
+            'cloud-leave': () => {
+                if (Sync.isOwnerDevice() && !confirm('⚠️ Bu telefon YÖNETİCİ CİHAZI. Ayrılırsa davet ve cihaz yönetimi için başka bir yönetici cihazı olmalı. Yine de devam edilsin mi?'))
+                    return;
+                if (confirm('Bu telefon kafeden ayrılacak; tekrar bağlanmak için yeni davet gerekir. Devam?')) {
+                    Sync.leave();
+                    S.wipeReal();
+                    user = null;
+                    render();
+                    toast('Kafeden ayrıldı');
+                }
+            },
+            devices: () => openDevices(),
+            'pub-staff': () => { history.replaceState(null, '', '#/home'); renderSetup(); },
             'join-go': () => doJoin(),
             'join-cancel': () => { history.replaceState(null, '', '#/home'); render(); },
             export: () => {
@@ -3033,5 +3641,5 @@ var __rest = (this && this.__rest) || function (s, e) {
     render();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http'))
         navigator.serviceWorker.register('sw.js').catch(() => { });
-    window.__app = { ui, openItem, receiveSheet, editItem, editUser, events, openAddDevice, openAsset, found, codeFromText, setUser: id => { user = S.user(id); render(); } }; // test için
+    window.__app = { APP_VERSION, openPaste, openTrash, openAudit, parsePaste, ui, openItem, receiveSheet, editItem, editUser, events, openAddDevice, openAsset, found, codeFromText, setUser: id => { user = S.user(id); render(); } }; // test için
 })();

@@ -1,35 +1,97 @@
 rules_version = '2';
-// Bambaşka / KafeStok — Firestore güvenlik kuralları
-// Firebase Console → Firestore Database → Rules sekmesine bu metnin tamamını yapıştırıp "Publish" de.
+// Bambaşka — Firestore güvenlik kuralları (davetli katılım, yetkili cihaz, silinemez işlem geçmişi)
+// Firebase Console → Firestore Database → Rules sekmesine bu metnin TAMAMINI yapıştırıp "Publish" de.
+//
+// Özet:
+// - Kafe kaydı bir kez oluşturulur (sadece 'bambaska' kimliği). Kuran telefon "yönetici cihazı" olur.
+// - Yeni telefon ancak tek kullanımlık, süresi dolmamış bir davetle (bağlantı + PIN) üye olabilir.
+// - Davet oluşturmak ve cihaz çıkarmak sadece yetkili telefonlardan (owner/admin) yapılabilir.
+// - Yönetici cihazını sadece yönetici cihazı çıkarabilir / yetkisini değiştirebilir.
+// - İşlem geçmişi (audit) sadece eklenebilir; değiştirilemez, silinemez.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function cafePath(cafeId) { return /databases/$(database)/documents/cafes/$(cafeId); }
-    function isMember(cafeId) {
-      return request.auth != null
-        && exists(/databases/$(database)/documents/cafes/$(cafeId)/members/$(request.auth.uid));
-    }
+    function signedIn() { return request.auth != null; }
+    function cafeDoc(cafeId) { return /databases/$(database)/documents/cafes/$(cafeId); }
+    function memberDoc(cafeId, uid) { return /databases/$(database)/documents/cafes/$(cafeId)/members/$(uid); }
+    function inviteDoc(cafeId, inv) { return /databases/$(database)/documents/cafes/$(cafeId)/invites/$(inv); }
+    function isMember(cafeId) { return signedIn() && exists(memberDoc(cafeId, request.auth.uid)); }
+    function level(cafeId) { return get(memberDoc(cafeId, request.auth.uid)).data.level; }
+    function isAdminDev(cafeId) { return isMember(cafeId) && level(cafeId) in ['owner', 'admin']; }
+    function isOwnerDev(cafeId) { return isMember(cafeId) && level(cafeId) == 'owner'; }
 
     match /cafes/{cafeId} {
-      // ilk kurulum: kafe kaydı bir kez oluşturulur, sonra değiştirilemez
-      allow create: if request.auth != null
-        && !exists(cafePath(cafeId))
-        && request.resource.data.joinCode is string
-        && request.resource.data.joinCode.size() >= 16;
-      allow read: if isMember(cafeId);
-      allow update, delete: if false;
+      // kurulum ekranı kafenin var olup olmadığını görebilsin (içinde gizli bilgi yok)
+      allow get: if signedIn();
+      allow list: if false;
+      // kafe bir kez kurulur; başka kafe açılamaz
+      allow create: if signedIn()
+        && cafeId == 'bambaska'
+        && request.resource.data.createdBy == request.auth.uid
+        && existsAfter(memberDoc(cafeId, request.auth.uid));
+      allow update: if isOwnerDev(cafeId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']);
+      allow delete: if false;
 
-      // cihaz katılımı: sadece doğru katılım kodunu bilen cihaz üye olabilir
+      // ---- cihazlar (üyeler)
       match /members/{uid} {
-        allow create, update: if request.auth != null
-          && request.auth.uid == uid
-          && request.resource.data.code == get(cafePath(cafeId)).data.joinCode;
-        allow read, delete: if isMember(cafeId);
+        allow read: if signedIn() && (request.auth.uid == uid || isAdminDev(cafeId));
+        // 1) kafeyi kuran telefon: yönetici cihazı
+        // 2) davetle katılan telefon: tek kullanımlık davet aynı anda "kullanıldı" işaretlenir
+        allow create: if signedIn() && request.auth.uid == uid && (
+            (request.resource.data.level == 'owner'
+              && !exists(cafeDoc(cafeId))
+              && getAfter(cafeDoc(cafeId)).data.createdBy == uid)
+          || (request.resource.data.level == 'member'
+              && request.resource.data.invite is string
+              && exists(inviteDoc(cafeId, request.resource.data.invite))
+              && get(inviteDoc(cafeId, request.resource.data.invite)).data.usedBy == null
+              && get(inviteDoc(cafeId, request.resource.data.invite)).data.exp > request.time
+              && getAfter(inviteDoc(cafeId, request.resource.data.invite)).data.usedBy == uid));
+        allow update: if signedIn() && (
+            // telefon kendi "son görülme / son kullanıcı" bilgisini günceller
+            (request.auth.uid == uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen', 'lastUser', 'device']))
+            // yetki seviyesi: sadece yönetici cihazı değiştirir
+          || (isOwnerDev(cafeId)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['level'])
+              && request.resource.data.level in ['owner', 'admin', 'member']));
+        // çıkarma: yetkili cihaz çıkarır; yönetici cihazını sadece yönetici cihazı çıkarır. Telefon kendini de çıkarabilir.
+        allow delete: if signedIn() && (
+            request.auth.uid == uid
+          || (isAdminDev(cafeId) && (resource.data.level != 'owner' || isOwnerDev(cafeId))));
       }
 
-      // kafe verileri: sadece üye cihazlar
+      // ---- davetler: sadece yetkili cihaz oluşturur/görür; katılan telefon sadece "kullandım" işaretler
+      match /invites/{inv} {
+        allow read, delete: if isAdminDev(cafeId);
+        allow create: if isAdminDev(cafeId)
+          && request.resource.data.usedBy == null
+          && request.resource.data.exp is timestamp
+          && request.resource.data.exp < request.time + duration.value(3, 'h');
+        allow update: if signedIn()
+          && resource.data.usedBy == null
+          && resource.data.exp > request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedBy', 'usedAt'])
+          && request.resource.data.usedBy == request.auth.uid
+          && existsAfter(memberDoc(cafeId, request.auth.uid));
+      }
+
+      // ---- çıkarılan cihazlar: telefon internete bağlanınca bunu görüp verisini siler
+      match /removed/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow create: if isAdminDev(cafeId);
+        allow delete: if signedIn() && (request.auth.uid == uid || isAdminDev(cafeId));
+      }
+
+      // ---- işlem geçmişi: sadece eklenir (30 günden eskisini gece yedeği temizler)
+      match /audit/{id} {
+        allow read, create: if isMember(cafeId);
+        allow update, delete: if false;
+      }
+
+      // ---- kafe verileri: sadece üye cihazlar
       match /{coll}/{docId} {
-        allow read, write: if coll != 'members' && isMember(cafeId);
+        allow read, write: if isMember(cafeId) && !(coll in ['members', 'invites', 'removed', 'audit']);
       }
     }
   }

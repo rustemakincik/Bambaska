@@ -135,8 +135,99 @@ const Sync = (() => {
                 setState({ status: 'online', msg: '' });
             computeStatus();
         }
-        else
+        else {
             setState({ status: st, msg: err ? errText(err) : '' });
+            if (err && /permission/i.test(String(err.code || err.message || err)))
+                checkMembership();
+        }
+    }
+    // ---- bu cihazın üyeliği: yetki seviyesi (owner = yönetici cihazı, admin = yetkili, member) ve çıkarılma kontrolü
+    const LS_LEVEL = 'kafestok.level', LS_REMOVED = 'kafestok.removedNotice';
+    let level = ls.get(LS_LEVEL) || null, checking = false;
+    function setLevel(l) { level = l; ls.set(LS_LEVEL, l); setState({ level: l }); }
+    function wipeLocal(reason) {
+        try {
+            unsub === null || unsub === void 0 ? void 0 : unsub();
+        }
+        catch (e) { }
+        unsub = null;
+        backend = null;
+        ls.set(poolKey(), null);
+        pool = {};
+        cloud = null;
+        shadow = {};
+        ls.set(LS_CLOUD, null);
+        ls.set(LS_SHADOW, null);
+        ls.set(LS_LEVEL, null);
+        level = null;
+        if (reason)
+            ls.set(LS_REMOVED, reason);
+        applying = true;
+        Store.wipeReal();
+        applying = false;
+        setState({ status: 'local', msg: '', pending: 0, level: null });
+    }
+    async function checkMembership() {
+        if (!backend || checking)
+            return;
+        checking = true;
+        try {
+            const me = await backend.me();
+            if (me) {
+                if (me.level !== level)
+                    setLevel(me.level);
+            }
+            else if (await backend.wasRemoved())
+                wipeLocal('removed');
+        }
+        catch (e) {
+            try {
+                if (await backend.wasRemoved())
+                    wipeLocal('removed');
+            }
+            catch (x) { }
+        }
+        finally {
+            checking = false;
+        }
+    }
+    // cihaz adı (Chrome'da model bilgisi ayrıca istenir)
+    let devName = '';
+    async function deviceName() {
+        if (devName)
+            return devName;
+        const u = navigator.userAgent;
+        let n = '';
+        try {
+            if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+                const h = await navigator.userAgentData.getHighEntropyValues(['model', 'platform']);
+                n = (h.model || '').trim();
+            }
+        }
+        catch (e) { }
+        if (!n) {
+            const m = u.match(/Android [\d.]+; ([^;)]+?)(?: Build|\))/);
+            if (m && m[1].trim().length > 1)
+                n = m[1].trim();
+        }
+        const kind = /iPad/.test(u) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? 'iPad' : /iPhone/.test(u) ? 'iPhone' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'Cihaz';
+        devName = (n && n !== kind ? kind + ' · ' + n : kind) + (window.BambaskaApp ? ' (uygulama)' : '');
+        return devName;
+    }
+    let touched = '';
+    async function touch(userName) {
+        if (!backend || !backend.touch || Store.isDemo)
+            return;
+        const key = (userName || '') + '|' + new Date().toDateString();
+        if (touched === key)
+            return;
+        touched = key;
+        try {
+            await backend.touch({ user: userName || '', device: await deviceName() });
+        }
+        catch (e) {
+            touched = '';
+        }
     }
     async function loadBackend(c) {
         // eski tarayıcılar (iOS 10–11.2): Firebase kütüphanesi çalışmaz → REST bağlantısı (rest-backend.js)
@@ -165,18 +256,27 @@ const Sync = (() => {
             setState({ status: 'demo' });
             return;
         } // demo asla buluta bağlanmaz
+        // güvenlik güncellemesi: kafe yeni Firebase projesine taşındı → eski bağlantıyı bırak, davetle yeniden bağlanılır
+        const emb = window.KAFE_FIREBASE;
+        if (cloud && cloud.type === 'firebase' && emb && (cloud.config.projectId !== emb.projectId || !cloud.v2)) {
+            wipeLocal('moved');
+            computeStatus();
+            return;
+        }
         if (!cloud) {
             computeStatus();
             return;
         }
-        setState({ status: 'connecting', msg: '' });
+        setState({ status: 'connecting', msg: '', level });
         try {
             backend = await loadBackend(cloud);
+            setTimeout(checkMembership, 1200);
             reconciled.clear();
             unsub = backend.subscribe(ALL(), onChanges, onBackendStatus);
             setState({ status: 'online' });
             computeStatus();
             push(); // bağlantı yokken birikmiş değişiklikler
+            setTimeout(() => Object.keys(BLOCK).forEach(refill), 1500);
         }
         catch (e) {
             backend = null;
@@ -196,6 +296,46 @@ const Sync = (() => {
             throw new Error('apiKey, projectId ve appId bulunamadı. firebaseConfig bloğunun tamamını yapıştır.');
         return cfg;
     }
+    // ---- numara havuzu: her cihaz buluttaki sayaçtan küçük numara blokları ayırır (DB-/SP-/SR- çakışmaz)
+    const BLOCK = { DB: 3, SP: 3, SR: 2 };
+    const poolKey = () => 'kafestok.pool.' + (cloud ? cloud.cafeId : '');
+    let pool = {};
+    const loadPool = () => { pool = (cloud && ls.get(poolKey())) || {}; };
+    const savePool = () => { if (cloud)
+        ls.set(poolKey(), pool); };
+    const refilling = {};
+    async function reserve(kind, count) {
+        if (!backend || !backend.reserve)
+            throw new Error('network: bağlantı yok');
+        const start = await backend.reserve(kind, count, Store.maxNo(kind));
+        const p = pool[kind] || (pool[kind] = []);
+        for (let i = 0; i < count; i++)
+            p.push(start + i);
+        p.sort((a, b) => a - b);
+        savePool();
+    }
+    function refill(kind) {
+        if (!backend || Store.isDemo || refilling[kind] || (pool[kind] || []).length >= 1)
+            return;
+        refilling[kind] = true;
+        reserve(kind, BLOCK[kind]).catch(() => { }).then(() => { refilling[kind] = false; });
+    }
+    Store.setNumberSource((kind, localMax) => {
+        if (!cloud || Store.isDemo)
+            return undefined;
+        const p = pool[kind] || [];
+        while (p.length && p[0] <= 0)
+            p.shift();
+        if (!p.length) {
+            refill(kind);
+            return null;
+        }
+        const n = p.shift();
+        savePool();
+        refill(kind);
+        return n;
+    });
+    loadPool();
     Store.onCommit(() => push());
     window.addEventListener('online', () => { computeStatus(); push(); });
     setInterval(() => { if (backend && state.status === 'error') {
@@ -210,38 +350,57 @@ const Sync = (() => {
         onState: f => (listeners.add(f), () => listeners.delete(f)),
         start,
         parseConfig,
-        // yönetici: bulutu ilk kez kurar ve bu cihazdaki veriyi yükler
-        async setup({ type = 'firebase', config }) {
-            const c = { type, config, cafeId: 'kafe-' + rand(10), joinCode: rand(20) };
+        // kafe bulutta kurulmuş mu? (kurulum ekranı "Yeni kafe kur"u buna göre gösterir)
+        async cafeExists() {
+            const c = { type: window.__cloudType || 'firebase', config: window.KAFE_FIREBASE, cafeId: window.KAFE_CAFE_ID || 'bambaska' };
+            if (!c.config && c.type !== 'mock')
+                return false;
             const be = await loadBackend(c);
-            await be.createCafe();
+            return be.cafeExists ? be.cafeExists() : false;
+        },
+        // yönetici: bulutu ilk kez kurar; bu telefon "yönetici cihazı" olur
+        async setup({ type = 'firebase', config, name, user }) {
+            const c = { type, config: config || window.KAFE_FIREBASE, cafeId: window.KAFE_CAFE_ID || ('kafe-' + rand(10)), v2: true };
+            const be = await loadBackend(c);
+            await be.createCafe({ name: name || '', user: user || '', device: await deviceName() });
             cloud = c;
             ls.set(LS_CLOUD, cloud);
+            loadPool();
+            ls.set(LS_REMOVED, null);
             backend = be;
             shadow = {};
             ls.set(LS_SHADOW, shadow);
+            setLevel('owner');
             reconciled.clear();
             ALL().forEach(x => reconciled.add(x)); // ilk yüklemede silme yapma
             push();
+            setTimeout(() => Object.keys(BLOCK).forEach(refill), 800);
             unsub = backend.subscribe(ALL(), onChanges, onBackendStatus);
             setState({ status: 'online', msg: '' });
             computeStatus();
             return c;
         },
-        // personel/diğer cihaz: katılım bağlantısıyla kafeye bağlanır, veriler buluttan gelir
-        async join(payload) {
-            const config = payload.c || window.KAFE_FIREBASE;
-            if (!config)
-                throw new Error('Bağlantıda bulut ayarı yok');
-            const c = { type: payload.t || 'firebase', config, cafeId: payload.id, joinCode: payload.k };
+        // davetle katıl: bağlantı (t) + 6 haneli PIN (p). Karekodda PIN de vardır.
+        async join(payload, pin) {
+            if (!payload || payload.k || !payload.t)
+                throw new Error('eski-baglanti');
+            const p = String(pin || payload.p || '').replace(/\D/g, '');
+            if (p.length !== 6)
+                throw new Error('pin-eksik');
+            const c = { type: payload.ty || window.__cloudType || 'firebase', config: window.KAFE_FIREBASE, cafeId: payload.id, v2: true };
+            if (!c.config && c.type !== 'mock')
+                throw new Error('Bulut ayarı yok');
             const be = await loadBackend(c);
-            await be.join();
+            await be.join({ id: payload.t + '-' + p, device: await deviceName(), by: payload.b || '', forName: payload.n || '' });
             unsub === null || unsub === void 0 ? void 0 : unsub();
             cloud = c;
             ls.set(LS_CLOUD, cloud);
+            loadPool();
+            ls.set(LS_REMOVED, null);
             backend = be;
             shadow = {};
             ls.set(LS_SHADOW, shadow);
+            setLevel('member');
             applying = true;
             Store.emptyForJoin();
             applying = false;
@@ -249,20 +408,70 @@ const Sync = (() => {
             unsub = backend.subscribe(ALL(), onChanges, onBackendStatus);
             setState({ status: 'online', msg: '' });
             computeStatus();
+            setTimeout(() => Object.keys(BLOCK).forEach(refill), 2500);
         },
-        leave() { unsub === null || unsub === void 0 ? void 0 : unsub(); unsub = null; backend = null; cloud = null; shadow = {}; ls.set(LS_CLOUD, null); ls.set(LS_SHADOW, null); setState({ status: 'local', msg: '', pending: 0 }); },
-        pushNow() { push(); },
-        joinLink() {
-            if (!cloud)
-                return '';
-            const emb = window.KAFE_FIREBASE;
-            const p = { id: cloud.cafeId, k: cloud.joinCode };
+        // ---- cihaz ve davet yönetimi (sadece yetkili telefon; kurallar da kontrol eder)
+        get level() { return level; },
+        get uid() { return backend ? backend.uid : null; },
+        isAdminDevice: () => level === 'owner' || level === 'admin',
+        isOwnerDevice: () => level === 'owner',
+        refreshMe: () => checkMembership(),
+        touch,
+        deviceName,
+        removedNotice: () => ls.get(LS_REMOVED),
+        clearRemovedNotice: () => ls.set(LS_REMOVED, null),
+        // gece yedeğinin (Apps Script) son durumu: { at, ok, note }
+        async backupInfo() { if (!backend || !backend.getDoc)
+            return null; try {
+            return await backend.getDoc('sys', 'backup');
+        }
+        catch (e) {
+            return null;
+        } },
+        async devices() { return backend ? backend.listMembers() : []; },
+        async invites() { return backend ? backend.listInvites() : []; },
+        async createInvite({ mode, forUser, forName, byName }) {
+            if (!backend)
+                throw new Error('network: bağlantı yok');
+            const token = rand(10), digits = new Uint32Array(1);
+            crypto.getRandomValues(digits);
+            const pin = String(digits[0] % 1000000).padStart(6, '0');
+            const exp = Date.now() + (mode === 'qr' ? 10 * 60e3 : 2 * 3600e3);
+            await backend.createInvite({ id: token + '-' + pin, mode, exp, forUser, forName, byName });
+            return { id: token + '-' + pin, token, pin, exp, mode, forUser, forName, byName };
+        },
+        inviteLink(inv, withPin) {
+            const p = { id: cloud.cafeId, t: inv.token || inv.id.split('-')[0], n: inv.forName || '', u: inv.forUser || '', b: inv.byName || '' };
             if (cloud.type !== 'firebase')
-                p.t = cloud.type;
-            if (!(emb && emb.projectId === cloud.config.projectId && emb.apiKey === cloud.config.apiKey))
-                p.c = cloud.config;
+                p.ty = cloud.type;
+            if (withPin)
+                p.p = inv.pin || inv.id.split('-')[1];
             return location.origin + location.pathname + '#/katil/' + b64e(p);
         },
+        async cancelInvite(id) { return backend.cancelInvite(id); },
+        async setDeviceLevel(uid, l) { return backend.setLevel(uid, l); },
+        async removeDevice(uid) { return backend.removeDevice(uid); },
+        leave() { try {
+            backend && backend.leave && backend.leave();
+        }
+        catch (e) { } ls.set(poolKey(), null); pool = {}; unsub === null || unsub === void 0 ? void 0 : unsub(); unsub = null; backend = null; cloud = null; shadow = {}; ls.set(LS_CLOUD, null); ls.set(LS_SHADOW, null); ls.set(LS_LEVEL, null); level = null; setState({ status: 'local', msg: '', pending: 0, level: null }); },
+        pushNow() { push(); },
+        // toplu ekleme öncesi: n numara hazır olsun (bulut yoksa her zaman hazır)
+        async ensureNumbers(kind, n) {
+            if (!cloud || Store.isDemo)
+                return true;
+            const have = (pool[kind] || []).length;
+            if (have >= n)
+                return true;
+            try {
+                await reserve(kind, n - have);
+                return true;
+            }
+            catch (e) {
+                return false;
+            }
+        },
+        numbersReady: (kind, n = 1) => !cloud || Store.isDemo || (pool[kind] || []).length >= n,
         decodeJoin: s => b64d(s),
     };
 })();
