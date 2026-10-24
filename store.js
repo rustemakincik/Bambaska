@@ -794,6 +794,45 @@ const Store = (() => {
                 commit();
             return tk;
         },
+        // taşıma: cihazı servise kim götürecek / servisten kim getirecek
+        assignCarrier(id, user, c = {}) {
+            const tk = this.ticket(id);
+            if (!tk || !c.to)
+                return;
+            const re = tk.carry && !tk.carry.doneAt && tk.carry.dir === c.dir;
+            tk.carry = { dir: c.dir || 'gotur', to: c.to, note: c.note || '', due: c.due || null, by: user, at: now() };
+            if (tk.status === 'servis') {
+                tk.status = 'islemde';
+                tk.progressAt = now();
+                tk.progressBy = user;
+            }
+            tk.log.push({ at: now(), user, action: re ? 'tasima_yeniden' : 'tasima_atandi', to: c.to, dir: tk.carry.dir, note: c.note || '' });
+            commit();
+            return tk;
+        },
+        carryDone(id, user) {
+            const tk = this.ticket(id);
+            if (!tk || !tk.carry || tk.carry.doneAt)
+                return;
+            Object.assign(tk.carry, { doneAt: now(), doneBy: user });
+            const a = this.asset(tk.assetId);
+            if (tk.carry.dir === 'gotur') {
+                tk.taken = true;
+                tk.returned = false;
+                tk.log.push({ at: now(), user, action: 'teslim_etti' });
+                if (a && a.status !== 'tamirde') {
+                    this.setAssetStatus(a.id, 'tamirde', user, `${tk.no} · servise teslim edildi`);
+                    return tk;
+                }
+            }
+            else {
+                tk.taken = false;
+                tk.returned = true;
+                tk.log.push({ at: now(), user, action: 'geri_getirdi' });
+            }
+            commit();
+            return tk;
+        },
         // sonuç: cozuldu (aktif) | onarilamadi (hurda/arızalı) | gerek_yok
         closeTicket(id, user, r = {}) {
             const tk = this.ticket(id);

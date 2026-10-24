@@ -597,6 +597,7 @@ var __rest = (this && this.__rest) || function (s, e) {
             const tks = db.tickets || [], ml = maintList().filter(x => x.late && !x.open);
             const tkc = (n, ic, title, body, tab) => n ? `<a href="#/demirbas" data-act="go-servis" data-id="${tab}" class="card approve-card" style="margin-top:10px"><span style="font-size:22px">${ic}</span><div style="flex:1"><b>${title}</b><div class="small muted">${body}</div></div><span class="btn primary sm">Aç</span></a>` : '';
             const tkOn = tks.filter(t => t.status === 'talep'), tkSv = tks.filter(t => t.status === 'servis');
+            scard += tks.filter(t => isCarrier(t)).map(t => { var _a, _b; return tkc(1, t.carry.dir === 'gotur' ? '🚐' : '↩️', `${((_a = S.asset(t.assetId)) === null || _a === void 0 ? void 0 : _a.name) || ''} · ${t.carry.dir === 'gotur' ? 'servise götür' : 'servisten al'}`, esc(`${((_b = S.service(t.serviceId)) === null || _b === void 0 ? void 0 : _b.name) || ''}${t.carry.due ? ' · ' + etaTxt(t.carry.due) : ''}${t.carry.note ? ' · ' + t.carry.note : ''}`), 'islemde'); }).join('');
             scard += (canTkApprove() ? tkc(tkOn.length, '🔧', `${tkOn.length} arıza / bakım talebi onay bekliyor`, esc(tkOn.map(t => { var _a; return `${((_a = S.asset(t.assetId)) === null || _a === void 0 ? void 0 : _a.name) || ''}${t.priority === 'acil' ? ' 🔥' : ''}`; }).join(', ')), 'talep') : '')
                 + (canTkTrack() ? tkc(tkSv.length, '📞', `${tkSv.length} kayıt servise bildirilecek`, esc(tkSv.map(t => { var _a; return ((_a = S.asset(t.assetId)) === null || _a === void 0 ? void 0 : _a.name) || ''; }).join(', ')), 'servis') : '')
                 + (canTkOpen() || canTkApprove() ? tkc(ml.length, '🛠️', `${ml.length} demirbaşın bakımı geldi`, esc(ml.map(x => x.a.name).join(', ')), 'talep') : '');
@@ -1297,15 +1298,17 @@ var __rest = (this && this.__rest) || function (s, e) {
     const canTkOpen = () => !readOnly() && can('servis_talep');
     const canTkApprove = () => !readOnly() && can('servis_onay');
     const canTkTrack = () => !readOnly() && can('servis_takip');
-    const visibleTickets = () => (S.get().tickets || []).filter(t => viewAll() || can('servis_onay') || can('servis_takip') || can('demirbas_yonet') || t.createdBy === user.name);
+    const visibleTickets = () => (S.get().tickets || []).filter(t => { var _a; return viewAll() || can('servis_onay') || can('servis_takip') || can('demirbas_yonet') || t.createdBy === user.name || ((_a = t.carry) === null || _a === void 0 ? void 0 : _a.to) === user.name; });
     const tkTabOf = t => !t ? 'talep' : ['bitti', 'red'].includes(t.status) ? 'gecmis' : t.status;
     const tkState = t => {
         var _a;
-        return t.status === 'servis' && ((_a = t.contacts) === null || _a === void 0 ? void 0 : _a.length) ? { name: 'Bildirildi · cevap bekleniyor', tone: 'azaliyor', icon: '📨' }
-            : t.status === 'islemde' && t.taken ? { name: 'Cihaz serviste', tone: 'azaliyor', icon: '🚐' }
-                : t.status === 'islemde' && t.visitAt ? { name: `Randevu ${etaTxt(t.visitAt)}`, tone: 'iyi', icon: '📅' }
-                    : t.status === 'bitti' && t.resolution === 'onarilamadi' ? { name: 'Onarılamadı', tone: 'kritik', icon: '🚫' }
-                        : TST[t.status] || TST.talep;
+        return carryOpen(t) ? { name: `${t.carry.dir === 'gotur' ? 'Götürecek' : 'Getirecek'}: ${t.carry.to}`, tone: 'azaliyor', icon: t.carry.dir === 'gotur' ? '🚐' : '↩️' }
+            : t.status === 'islemde' && t.returned ? { name: 'Geri geldi · sonuç bekleniyor', tone: 'azaliyor', icon: '📦' }
+                : t.status === 'servis' && ((_a = t.contacts) === null || _a === void 0 ? void 0 : _a.length) ? { name: 'Bildirildi · cevap bekleniyor', tone: 'azaliyor', icon: '📨' }
+                    : t.status === 'islemde' && t.taken ? { name: 'Cihaz serviste', tone: 'azaliyor', icon: '🚐' }
+                        : t.status === 'islemde' && t.visitAt ? { name: `Randevu ${etaTxt(t.visitAt)}`, tone: 'iyi', icon: '📅' }
+                            : t.status === 'bitti' && t.resolution === 'onarilamadi' ? { name: 'Onarılamadı', tone: 'kritik', icon: '🚫' }
+                                : TST[t.status] || TST.talep;
     };
     // bakım takibi: periyodu olan demirbaşlar, sonraki bakım tarihi
     function maintList() {
@@ -1380,7 +1383,7 @@ var __rest = (this && this.__rest) || function (s, e) {
       ${canTkOpen() ? `<div class="small muted" style="text-align:center;margin-top:10px">Yeni talep: demirbaşı aç (ya da karekodunu okut) → <b>Arıza bildir</b> / <b>Bakım talebi</b></div>` : ''}`;
     }
     function ticketCard(t) {
-        var _a;
+        var _a, _b;
         const a = S.asset(t.assetId), st = tkState(t), sv = S.service(t.serviceId), [ic, tn] = TTYPE[t.type] || TTYPE.ariza;
         const meta = t.status === 'talep' ? `${esc(t.createdBy)} · ${ago(t.createdAt)}`
             : t.status === 'servis' ? (((_a = t.contacts) === null || _a === void 0 ? void 0 : _a.length) ? `${esc(t.contacts[t.contacts.length - 1].by)} bildirdi · ${ago(t.contacts[t.contacts.length - 1].at)}` : `Onaylayan ${esc(t.approvedBy || '')} · ${ago(t.approvedAt)}`)
@@ -1393,6 +1396,8 @@ var __rest = (this && this.__rest) || function (s, e) {
             t.serviceRef && `<div class="o-note"><span>🧾 Servis kayıt no:</span> <b class="code">${esc(t.serviceRef)}</b></div>`,
             t.visitAt && t.status === 'islemde' && `<div class="o-note"><span>📅 Randevu / teslim:</span> ${etaTxt(t.visitAt)}</div>`,
             t.progressNote && `<div class="o-note"><span>💬 Servis notu:</span> ${esc(t.progressNote)}</div>`,
+            carryOpen(t) && `<div class="o-note admin"><span>${t.carry.dir === 'gotur' ? '🚐' : '↩️'} ${esc(t.carry.by)} → ${esc(t.carry.to)}${t.carry.due ? ` · ${etaTxt(t.carry.due)}` : ''}:</span> ${t.carry.dir === 'gotur' ? 'servise götür' : 'servisten al'}${t.carry.note ? ' · ' + esc(t.carry.note) : ''}</div>`,
+            ((_b = t.carry) === null || _b === void 0 ? void 0 : _b.doneAt) && !carryOpen(t) && `<div class="o-note"><span>${t.carry.dir === 'gotur' ? '🚐 Servise teslim:' : '↩️ Geri getiren:'}</span> ${esc(t.carry.doneBy)} · ${ago(t.carry.doneAt)}</div>`,
             t.adminNote && `<div class="o-note admin"><span>🛡️ Yönetici:</span> ${esc(t.adminNote)}</div>`,
             t.status === 'bitti' && `<div class="o-note"><span>✅ Sonuç:</span> ${RES[t.resolution] || ''}${t.resultNote ? ' · ' + esc(t.resultNote) : ''}</div>`,
         ].filter(Boolean).join('');
@@ -1401,7 +1406,10 @@ var __rest = (this && this.__rest) || function (s, e) {
             t.status === 'talep' && !canTkApprove() && t.createdBy === user.name && `<button class="btn ghost sm" data-act="tk-withdraw" data-id="${t.id}">Geri çek</button>`,
             ['servis', 'islemde'].includes(t.status) && canTkTrack() && (sv === null || sv === void 0 ? void 0 : sv.phone) && `<a class="btn sm" href="tel:+${esc(sv.phone)}" data-act="tk-tel" data-id="${t.id}">📞 Ara</a><button class="btn wa sm" data-act="tk-wa" data-id="${t.id}">WhatsApp</button>`,
             t.status === 'servis' && canTkTrack() && `<button class="btn ghost sm" data-act="tk-close" data-id="${t.id}">Kendimiz hallettik</button><button class="btn primary" data-act="tk-progress" data-id="${t.id}">Servis kaydını gir</button>`,
-            t.status === 'islemde' && canTkTrack() && `<button class="btn sm" data-act="tk-progress" data-id="${t.id}">Güncelle</button><button class="btn primary" data-act="tk-close" data-id="${t.id}">Sonuç gir</button>`,
+            carryOpen(t) && (isCarrier(t) || canTkTrack()) && `<button class="btn primary" data-act="tk-carried" data-id="${t.id}">${t.carry.dir === 'gotur' ? '✅ Servise teslim ettim' : '✅ Geri getirdim'}</button>`,
+            carryOpen(t) && canTkTrack() && `<button class="btn ghost sm" data-act="tk-carrier" data-id="${t.id}" data-dir="${t.carry.dir}">Başkasına ata</button>`,
+            t.status === 'islemde' && !carryOpen(t) && canTkTrack() && (t.taken ? `<button class="btn sm" data-act="tk-carrier" data-id="${t.id}" data-dir="getir">↩️ Kim alacak?</button>` : !t.returned ? `<button class="btn sm" data-act="tk-carrier" data-id="${t.id}" data-dir="gotur">🚐 Kim götürecek?</button>` : ''),
+            t.status === 'islemde' && canTkTrack() && `<button class="btn sm" data-act="tk-progress" data-id="${t.id}">Güncelle</button><button class="btn ${carryOpen(t) ? 'sm' : 'primary'}" data-act="tk-close" data-id="${t.id}">Sonuç gir</button>`,
             ['servis', 'islemde'].includes(t.status) && canTkApprove() && `<button class="btn ghost sm" data-act="tk-cancel" data-id="${t.id}">İptal</button>`,
         ].filter(Boolean).join('');
         return `<div class="card order-card" style="padding:0;margin-bottom:12px">
@@ -1445,15 +1453,25 @@ var __rest = (this && this.__rest) || function (s, e) {
             const df = Math.round((new Date(visit).setHours(12, 0, 0, 0) - day(0)) / 864e5);
             vKey = df === 0 || df === 1 ? String(df) : 'd';
         }
+        let dev = t.taken ? 'serviste' : t.carry && !t.carry.doneAt && t.carry.dir === 'gotur' ? 'gotur' : 'yerinde';
         sheet(`<h3>Servis kaydı</h3><div class="sub">${esc(t.no)} · ${esc((a === null || a === void 0 ? void 0 : a.name) || '')} — servisle konuştuktan sonra gir</div>
       <label class="field"><span>Servis</span><select id="pgSvc"><option value="">— Seçilmedi —</option>${svs.map(v => `<option value="${v.id}" ${v.id === t.serviceId ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
       <label class="field"><span>🧾 Servis kayıt / iş emri no</span><input id="pgRef" value="${esc(t.serviceRef || '')}" placeholder="örn. 2026-118842"></label>
       <div class="field"><span>Randevu / teslim tarihi</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0"><button class="chip" data-v="0">Bugün</button><button class="chip" data-v="1">Yarın</button>
         <label class="chip date-chip" id="pgDateChip">📅 <span id="pgDateTxt">Tarih seç</span><input type="date" id="pgDate"></label></div></div>
-      <label class="radio-row"><input type="checkbox" id="pgTaken" ${t.taken ? 'checked' : ''}><span><b>Cihaz servise götürüldü</b><small>Demirbaş “Tamirde” olarak işaretlenir</small></span></label>
+      <div class="field"><span>Cihaz</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0">
+        <button class="chip" data-dev="yerinde">🧑‍🔧 Yerinde bakılacak</button><button class="chip" data-dev="gotur">🚐 Servise götürülecek</button><button class="chip" data-dev="serviste">🏢 Serviste</button></div>
+        <div class="small muted" id="pgDevHint" style="margin-top:6px"></div></div>
       <label class="field"><span>Not</span><input id="pgNote" value="${esc(t.progressNote || '')}" placeholder="örn. Usta yarın 14:00'te gelecek · parça siparişi verildi"></label>
       <button class="btn primary block" id="pgOk">Kaydet · işlemde</button>`, sh => {
+            const drawDev = () => {
+                sh.querySelectorAll('[data-dev]').forEach(b => b.classList.toggle('on', b.dataset.dev === dev));
+                sh.querySelector('#pgDevHint').textContent = dev === 'gotur' ? 'Kaydettikten sonra götürecek kişiyi seçeceksin.' : dev === 'serviste' ? 'Demirbaş “Tamirde” olarak işaretlenir.' : 'Usta gelip yerinde bakacak.';
+                sh.querySelector('#pgOk').textContent = dev === 'gotur' ? 'Kaydet · götürecek kişiyi seç' : 'Kaydet · işlemde';
+            };
+            sh.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => { dev = b.dataset.dev; drawDev(); });
             draw(sh);
+            drawDev();
             sh.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { vKey = vKey === b.dataset.v ? '' : b.dataset.v; visit = vKey ? day(+vKey) : null; sh.querySelector('#pgDate').value = ''; draw(sh); });
             const dIn = sh.querySelector('#pgDate');
             dIn.onclick = () => { try {
@@ -1466,14 +1484,68 @@ var __rest = (this && this.__rest) || function (s, e) {
                 vKey = 'd';
             } draw(sh); };
             sh.querySelector('#pgOk').onclick = () => {
-                S.ticketProgress(id, user.name, { serviceId: sh.querySelector('#pgSvc').value || null, serviceRef: sh.querySelector('#pgRef').value.trim(), visitAt: visit, taken: sh.querySelector('#pgTaken').checked, note: sh.querySelector('#pgNote').value.trim() });
-                closeSheet();
+                S.ticketProgress(id, user.name, { serviceId: sh.querySelector('#pgSvc').value || null, serviceRef: sh.querySelector('#pgRef').value.trim(), visitAt: visit, taken: dev === 'serviste', note: sh.querySelector('#pgNote').value.trim() });
                 ui.tkTab = 'islemde';
+                if (dev === 'gotur')
+                    return carrierSheet(id, 'gotur');
+                closeSheet();
                 render();
                 toast(`${t.no} işlemde`);
             };
         });
     }
+    // cihazı kim götürecek / kim getirecek
+    function carrierSheet(id, dir = 'gotur') {
+        const t = S.ticket(id), a = S.asset(t.assetId), sv = S.service(t.serviceId);
+        const people = S.get().users.filter(u => u.role !== 'gelistirici');
+        const cur = t.carry && !t.carry.doneAt && t.carry.dir === dir ? t.carry : null;
+        let to = (cur === null || cur === void 0 ? void 0 : cur.to) || '', due = (cur === null || cur === void 0 ? void 0 : cur.due) || null, dueKey = '';
+        const day = n => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return d.getTime(); };
+        if (due) {
+            const df = Math.round((new Date(due).setHours(12, 0, 0, 0) - day(0)) / 864e5);
+            dueKey = df === 0 || df === 1 ? String(df) : 'd';
+        }
+        const draw = sh => {
+            sh.querySelectorAll('[data-to]').forEach(b => b.classList.toggle('on', b.dataset.to === to));
+            sh.querySelectorAll('[data-due]').forEach(b => b.classList.toggle('on', b.dataset.due === dueKey));
+            sh.querySelector('#crDateChip').classList.toggle('on', dueKey === 'd');
+            sh.querySelector('#crDateTxt').textContent = dueKey === 'd' && due ? new Date(due).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'short' }) : 'Tarih seç';
+            const b = sh.querySelector('#crOk');
+            b.disabled = !to;
+            b.textContent = to ? `${to} ${dir === 'gotur' ? 'götürsün' : 'getirsin'}` : 'Kim? Seç';
+        };
+        sheet(`<h3>${dir === 'gotur' ? '🚐 Servise kim götürecek?' : '↩️ Servisten kim alacak?'}</h3>
+      <div class="sub">${esc(t.no)} · ${esc((a === null || a === void 0 ? void 0 : a.name) || '')} <span class="code">${esc((a === null || a === void 0 ? void 0 : a.code) || '')}</span>${sv ? ` · ${esc(sv.name)}` : ''}${t.serviceRef ? ` · kayıt no ${esc(t.serviceRef)}` : ''}</div>
+      <div class="field"><span>Kim?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0">${people.map(u => `<button class="chip" data-to="${esc(u.name)}">${esc(u.name)} <small class="muted">${roleName(u.role)}</small></button>`).join('')}</div></div>
+      <div class="field"><span>Ne zaman?</span><div class="chips" style="flex-wrap:wrap;margin:0;padding:0"><button class="chip" data-due="0">Bugün</button><button class="chip" data-due="1">Yarın</button>
+        <label class="chip date-chip" id="crDateChip">📅 <span id="crDateTxt">Tarih seç</span><input type="date" id="crDate"></label></div></div>
+      <label class="field"><span>Not <em class="fhint">${dir === 'gotur' ? 'götürecek' : 'alacak'} kişiye</em></span><textarea id="crNote" rows="2" placeholder="${dir === 'gotur' ? 'örn. Kumandası ve kablosuyla götür, kayıt numarasını söyle, fiş al' : 'örn. Ücreti kasadan öde, faturayı al'}">${esc((cur === null || cur === void 0 ? void 0 : cur.note) || '')}</textarea></label>
+      <button class="btn primary block" id="crOk"></button>`, sh => {
+            draw(sh);
+            sh.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { to = b.dataset.to; draw(sh); });
+            sh.querySelectorAll('[data-due]').forEach(b => b.onclick = () => { dueKey = dueKey === b.dataset.due ? '' : b.dataset.due; due = dueKey ? day(+dueKey) : null; sh.querySelector('#crDate').value = ''; draw(sh); });
+            const dIn = sh.querySelector('#crDate');
+            dIn.onclick = () => { try {
+                dIn.showPicker();
+            }
+            catch (x) { } };
+            dIn.onchange = () => { const v = dIn.value; if (v) {
+                const [y, m, d] = v.split('-').map(Number);
+                due = new Date(y, m - 1, d, 12).getTime();
+                dueKey = 'd';
+            } draw(sh); };
+            sh.querySelector('#crOk').onclick = () => {
+                S.assignCarrier(id, user.name, { dir, to, due, note: sh.querySelector('#crNote').value.trim() });
+                closeSheet();
+                ui.aView = 'servis';
+                ui.tkTab = 'islemde';
+                render();
+                toast(`${(a === null || a === void 0 ? void 0 : a.name) || ''} → ${to} ${dir === 'gotur' ? 'servise götürecek' : 'servisten alacak'}`);
+            };
+        });
+    }
+    const carryOpen = t => t.carry && !t.carry.doneAt ? t.carry : null;
+    const isCarrier = t => { var _a; return ((_a = carryOpen(t)) === null || _a === void 0 ? void 0 : _a.to) === (user === null || user === void 0 ? void 0 : user.name); };
     function closeTicketSheet(id) {
         const t = S.ticket(id), a = S.asset(t.assetId);
         let res = t.status === 'servis' ? 'gerek_yok' : 'cozuldu';
@@ -1928,6 +2000,7 @@ var __rest = (this && this.__rest) || function (s, e) {
                 out.push({ id, at: l.at, icon: '⚠️', title: `${o.no} kısmen geldi`, body: `${supName(o)} · ${l.user} · kalan bekleniyor`, hash: '#/siparis', tab: 'yolda' });
         }));
         (db.tickets || []).forEach(t => (t.log || []).forEach((l, i) => {
+            var _a;
             if (!l.at || l.at < since || l.user === me)
                 return;
             const a = db.assets.find(x => x.id === t.assetId), nm = `${(a === null || a === void 0 ? void 0 : a.name) || ''} (${t.no})`, id = `t:${t.id}:${i}`, base = { at: l.at, hash: '#/demirbas', tkTab: tkTabOf(t) };
@@ -1935,6 +2008,10 @@ var __rest = (this && this.__rest) || function (s, e) {
                 out.push(Object.assign(Object.assign({}, base), { id, icon: t.type === 'bakim' ? '🛠️' : '⚠️', title: `${l.user} ${t.type === 'bakim' ? 'bakım' : 'arıza'} talebi açtı${t.priority === 'acil' ? ' · ACİL' : ''}`, body: `${nm}${t.desc ? ' · ' + t.desc : ''}` }));
             else if (l.action === 'onayladi' && t.status === 'servis' && can('servis_takip') && !isAdmin())
                 out.push(Object.assign(Object.assign({}, base), { id, icon: '📞', title: `Servise bildirilecek: ${(a === null || a === void 0 ? void 0 : a.name) || ''}`, body: `${t.no} · ${l.user} onayladı${t.priority === 'acil' ? ' · ACİL' : ''}` }));
+            else if (['tasima_atandi', 'tasima_yeniden'].includes(l.action) && l.to === me && ((_a = t.carry) === null || _a === void 0 ? void 0 : _a.to) === me && !t.carry.doneAt)
+                out.push(Object.assign(Object.assign({}, base), { id, icon: l.dir === 'gotur' ? '🚐' : '↩️', title: `${(a === null || a === void 0 ? void 0 : a.name) || ''} ${l.dir === 'gotur' ? 'servise götürülecek' : 'servisten alınacak'} · sen`, body: `${t.no}${t.carry.due ? ' · ' + etaTxt(t.carry.due) : ''}${l.note ? ' · ' + l.note : ''}` }));
+            else if (['teslim_etti', 'geri_getirdi'].includes(l.action) && (canTkTrack() || can('servis_onay') || isDev()))
+                out.push(Object.assign(Object.assign({}, base), { id, icon: l.action === 'teslim_etti' ? '🚐' : '📦', title: `${(a === null || a === void 0 ? void 0 : a.name) || ''} ${l.action === 'teslim_etti' ? 'servise teslim edildi' : 'servisten geri geldi'}`, body: `${t.no} · ${l.user}${l.action === 'geri_getirdi' && t.status === 'islemde' ? ' · sonucu gir' : ''}` }));
             else if (['onayladi', 'reddetti', 'islemde', 'bitti'].includes(l.action) && t.createdBy === me)
                 out.push(Object.assign(Object.assign({}, base), { id, icon: { onayladi: '✅', reddetti: '✖️', islemde: '🔧', bitti: '✅' }[l.action], title: `${t.no} ${{ onayladi: 'onaylandı', reddetti: 'reddedildi', islemde: 'serviste / işlemde', bitti: RES[t.resolution] || 'tamamlandı' }[l.action]}`, body: `${(a === null || a === void 0 ? void 0 : a.name) || ''}${l.note ? ' · ' + l.note : ''}` }));
             else if (l.action === 'bitti' && (can('servis_onay') || isDev()))
@@ -2879,6 +2956,15 @@ var __rest = (this && this.__rest) || function (s, e) {
             'tk-review': () => reviewTicket(id),
             'tk-progress': () => progressSheet(id),
             'tk-close': () => closeTicketSheet(id),
+            'tk-carrier': () => carrierSheet(id, el.dataset.dir || 'gotur'),
+            'tk-carried': () => {
+                const t = S.ticket(id), dir = t.carry.dir;
+                S.carryDone(id, user.name);
+                render();
+                toast(dir === 'gotur' ? 'Servise teslim edildi · demirbaş “Tamirde”' : 'Geri getirildi');
+                if (dir === 'getir' && canTkTrack())
+                    setTimeout(() => closeTicketSheet(id), 300);
+            },
             'tk-tel': () => { if (S.ticket(id).status === 'servis')
                 S.ticketContact(id, user.name, 'tel'); setTimeout(render, 300); },
             'tk-wa': () => { const t = S.ticket(id), sv = S.service(t.serviceId); if (t.status === 'servis')
